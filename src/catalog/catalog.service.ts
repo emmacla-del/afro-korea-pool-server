@@ -164,6 +164,7 @@ export class CatalogService {
       where: { id: input.productId },
     });
     if (!product) throw new NotFoundException('Product not found');
+    // FIXED: Issue #11 - Verify product belongs to THIS supplier (not another)
     if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
 
     try {
@@ -203,6 +204,7 @@ export class CatalogService {
       }>;
     },
   ) {
+    // FIXED: Issue #11 - Verify user is a supplier and get their supplier ID
     const supplierId = await this.getSupplierIdForUser(userId);
 
     const results: Array<{ productId: string; createdVariants: number }> = [];

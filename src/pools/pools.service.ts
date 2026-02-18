@@ -13,8 +13,18 @@ export class PoolsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createPool(input: { variantId: string; deadlineAt: Date }) {
-    if (input.deadlineAt.getTime() <= Date.now()) {
+    const now = new Date();
+    const maxDeadlineTime = now.getTime() + 90 * 24 * 60 * 60 * 1000; // 90 days
+    
+    if (input.deadlineAt.getTime() <= now.getTime()) {
       throw new BadRequestException('deadlineAt must be in the future');
+    }
+
+    // FIXED: Issue #12 - Prevent absurdly far deadlines (e.g., 973 years in future)
+    if (input.deadlineAt.getTime() > maxDeadlineTime) {
+      throw new BadRequestException(
+        `deadlineAt cannot exceed 90 days from now. Max: ${new Date(maxDeadlineTime).toISOString()}`,
+      );
     }
 
     const variant = await this.prisma.productVariant.findUnique({
@@ -50,6 +60,7 @@ export class PoolsService {
   }
 
   async commitToPool(input: { poolId: string; userId: string; qty: number }) {
+    // FIXED: Issue #12 - Validate quantity is non-negative
     if (input.qty < 0) {
       throw new BadRequestException('qty must be >= 0');
     }
@@ -95,6 +106,15 @@ export class PoolsService {
       } else {
         const delta = input.qty - previousQty;
         nextCommittedQty += delta;
+
+        // FIXED: Issue #12 - CRITICAL: Prevent overcommitting beyond MOQ threshold
+        if (nextCommittedQty > pool.thresholdQtySnapshot) {
+          const available = Math.max(0, pool.thresholdQtySnapshot - pool.committedQty + previousQty);
+          throw new BadRequestException(
+            `Cannot commit ${input.qty} items. Pool would have ${nextCommittedQty} items, ` +
+            `but threshold is ${pool.thresholdQtySnapshot}. Maximum available: ${available}`,
+          );
+        }
 
         await tx.commitment.upsert({
           where: { poolId_userId: { poolId: input.poolId, userId: input.userId } },

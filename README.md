@@ -59,7 +59,7 @@ This folder is a minimal backend for the “pooling / threshold” e-commerce MV
 
 `npm.cmd run dev`
 
-Server starts on `http://localhost:3000` by default.
+Server starts on `https://afropool-backend.onrender.com` in production (or `http://localhost:3000` when running locally).
 
 ## API quickstart (manual MVP auth)
 

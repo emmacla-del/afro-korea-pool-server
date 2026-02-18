@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { initDatabase } from './db';
 
 async function bootstrap() {
+  console.log(`${new Date().toISOString()} - Starting application bootstrap...`);
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0'; // Render requires 0.0.0.0
   const bodyLimit =
@@ -22,20 +23,34 @@ async function bootstrap() {
 
   // CORS configuration
   await app.register(fastifyCors, {
-    origin:
-      process.env.CORS_ORIGIN && process.env.CORS_ORIGIN.trim().length > 0
-        ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
-        : process.env.NODE_ENV === 'production'
-          ? false
-          : true,
+    origin: (() => {
+      const raw = process.env.CORS_ORIGIN?.trim();
+      if (raw && raw.length > 0) {
+        // Support '*' (allow all), or a comma-separated list of origins
+        if (raw === '*') return true;
+        return raw.split(',').map((s) => s.trim());
+      }
+      // Default: allow all on non-production, disable by default in production
+      return process.env.NODE_ENV === 'production' ? false : true;
+    })(),
     credentials: true,
   });
 
   // Initialize database (uses Prisma via PrismaService)
-  await initDatabase();
+  console.log(`${new Date().toISOString()} - DATABASE_URL present: ${Boolean(process.env.DATABASE_URL)}`);
+  console.log(`${new Date().toISOString()} - Attempting database connection...`);
+  try {
+    await initDatabase();
+    console.log(`${new Date().toISOString()} - Database connected successfully`);
+  } catch (err: any) {
+    console.error(`${new Date().toISOString()} - Database initialization error:`, err?.message ?? err);
+    console.error(`${new Date().toISOString()} - Continuing startup despite DB error`);
+  }
 
   // Listen on all interfaces for Render compatibility
+  console.log(`${new Date().toISOString()} - Starting server on port ${port}...`);
   await app.listen({ port, host });
+  console.log(`${new Date().toISOString()} - Server is now listening on port ${port}`);
 
   const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
   console.log(`🚀 Server running at ${protocol}://0.0.0.0:${port}`);
