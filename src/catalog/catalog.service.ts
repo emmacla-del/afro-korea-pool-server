@@ -133,14 +133,14 @@ export class CatalogService {
 
   async createProduct(
     userId: string,
-    input: { title: string; description?: string; category?: string },
+    input: { product_name: string; description?: string; category?: string },
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
     const created = await this.prisma.product.create({
       data: {
         id: randomUUID(),
         supplierId,
-        title: input.title,
+        title: input.product_name,
         description: input.description ?? null,
         category: input.category ?? null,
         isActive: true,
@@ -192,7 +192,7 @@ export class CatalogService {
     userId: string,
     input: {
       products: Array<{
-        title: string;
+        product_name: string;
         description?: string;
         category?: string;
         variants: Array<{
@@ -218,7 +218,7 @@ export class CatalogService {
             data: {
               id: productId,
               supplierId,
-              title: productInput.title,
+              title: productInput.product_name,
               description: productInput.description ?? null,
               category: productInput.category ?? null,
               isActive: true,
@@ -246,15 +246,15 @@ export class CatalogService {
         });
 
         results.push({ productId: created.id, createdVariants: productInput.variants.length });
-      } catch (err: any) {
+        } catch (err: any) {
         const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
         if (err?.code === 'P2002' || (message.toLowerCase().includes('unique') && message.toLowerCase().includes('sku'))) {
           errors.push({
-            productTitle: productInput.title,
+            productTitle: productInput.product_name,
             error: 'SKU must be globally unique; one of the variant SKUs already exists.',
           });
         } else {
-          errors.push({ productTitle: productInput.title, error: message });
+          errors.push({ productTitle: productInput.product_name, error: message });
         }
       }
     }

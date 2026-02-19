@@ -5,7 +5,7 @@ import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
 const createProductSchema = z.object({
-  title: z.string().min(1).max(200),
+  product_name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
   category: z.string().max(100).optional(),
 });
@@ -22,7 +22,7 @@ const importSchema = z.object({
   products: z
     .array(
       z.object({
-        title: z.string().min(1).max(200),
+        product_name: z.string().min(1).max(200),
         description: z.string().max(2000).optional(),
         category: z.string().max(100).optional(),
         variants: z
