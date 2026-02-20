@@ -108,6 +108,22 @@ function resolveSsl(connectionString: string): PoolConfig['ssl'] {
 
 const connectionString = getConnectionString();
 
+const createFallbackPool = () => ({
+  query: async () => {
+    throw new Error('Database not configured');
+  },
+  connect: async () => {
+    throw new Error('Database not configured');
+  },
+  end: async () => Promise.resolve(),
+  totalCount: 0,
+  idleCount: 0,
+  waitingCount: 0,
+});
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pool: any;
+
 if (!connectionString) {
   console.error(`${new Date().toISOString()} - ⚠️ DATABASE_URL is not set. Database features will be disabled.`);
 }
@@ -134,8 +150,7 @@ if (connectionString) {
       ) ?? 5_000;
 
     // Create pool
-    // eslint-disable-next-line import/no-mutable-exports
-    export const pool = new Pool({
+    pool = new Pool({
       connectionString,
       max: poolMax,
       idleTimeoutMillis,
@@ -149,7 +164,7 @@ if (connectionString) {
       console.log(`${new Date().toISOString()} - ✅ New database client connected`);
     });
 
-    pool.on('error', (err) => {
+    pool.on('error', (err: any) => {
       console.error(`${new Date().toISOString()} - [db] PostgreSQL pool error:`, err?.message ?? err);
     });
 
@@ -158,24 +173,18 @@ if (connectionString) {
     });
   } catch (err: any) {
     console.error(`${new Date().toISOString()} - ❌ Error configuring database pool:`, err?.message ?? err);
-    // Do not rethrow — allow the app to continue starting for debugging
+    pool = createFallbackPool();
+    console.log(`${new Date().toISOString()} - Using fallback DB stub`);
   }
 } else {
   // Create a safe stub for `pool` API surface so imports won't crash.
   // The stub throws on query/connect to make failures explicit at runtime.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  export const pool: any = {
-    query: async () => { throw new Error('Database not configured'); },
-    connect: async () => { throw new Error('Database not configured'); },
-    end: async () => Promise.resolve(),
-    // minimal stats
-    totalCount: 0,
-    idleCount: 0,
-    waitingCount: 0,
-  };
+  pool = createFallbackPool();
 
   console.log(`${new Date().toISOString()} - ℹ️ Using fallback DB stub`);
 }
+
+export { pool };
 
 export async function initDatabase(): Promise<void> {
   try {
