@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireUserId } from '../common/auth';
@@ -60,8 +60,18 @@ export class CatalogController {
   @Post('/supplier/products')
   async createProduct(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
-    const parsed = createProductSchema.parse(body);
-    return this.catalogService.createProduct(userId, parsed);
+    const parsed = createProductSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException({
+        message: 'Validation failed',
+        errors: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+          code: issue.code,
+        })),
+      });
+    }
+    return this.catalogService.createProduct(userId, parsed.data);
   }
 
   @Post('/supplier/variants')
@@ -78,4 +88,3 @@ export class CatalogController {
     return this.catalogService.importCatalog(userId, parsed);
   }
 }
-
