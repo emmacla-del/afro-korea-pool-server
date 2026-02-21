@@ -30,6 +30,32 @@ export class SupplierService {
     });
   }
 
+  async getPurchaseOrdersSummary(userId: string) {
+    const supplier = await this.getSupplierForUser(userId);
+
+    const [pending, shipped] = await this.prisma.$transaction([
+      this.prisma.purchaseOrder.count({
+        where: {
+          supplierId: supplier.id,
+          status: {
+            in: [
+              PurchaseOrderStatus.PENDING_SUPPLIER_CONFIRM,
+              PurchaseOrderStatus.CONFIRMED,
+            ],
+          },
+        },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: {
+          supplierId: supplier.id,
+          status: PurchaseOrderStatus.SHIPPED,
+        },
+      }),
+    ]);
+
+    return { pending, shipped };
+  }
+
   async confirmPurchaseOrder(userId: string, purchaseOrderId: string) {
     const supplier = await this.getSupplierForUser(userId);
     const po = await this.prisma.purchaseOrder.findFirst({

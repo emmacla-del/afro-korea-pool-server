@@ -18,6 +18,12 @@ export class SupplierPurchaseOrdersController {
     return this.supplierService.listPurchaseOrders(userId);
   }
 
+  @Get('/supplier/purchase-orders/summary')
+  async summary(@Req() req: FastifyRequest) {
+    const userId = requireUserId(req);
+    return this.supplierService.getPurchaseOrdersSummary(userId);
+  }
+
   @Post('/supplier/purchase-orders/:id/confirm')
   async confirm(@Req() req: FastifyRequest, @Param('id') purchaseOrderId: string) {
     const userId = requireUserId(req);

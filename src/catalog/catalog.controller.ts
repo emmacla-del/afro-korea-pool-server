@@ -73,6 +73,18 @@ export class CatalogController {
     return this.catalogService.listSupplierProducts(userId);
   }
 
+  @Get('/supplier/products/summary')
+  async supplierProductsSummary(@Req() req: FastifyRequest) {
+    const userId = requireUserId(req);
+    return this.catalogService.getSupplierProductsSummary(userId);
+  }
+
+  @Get('/supplier/catalog-imports/latest')
+  async latestCatalogImport(@Req() req: FastifyRequest) {
+    const userId = requireUserId(req);
+    return this.catalogService.getLatestCatalogImport(userId);
+  }
+
   @Post('/supplier/products')
   async createProduct(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);

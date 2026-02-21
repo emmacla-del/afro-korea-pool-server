@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { PoolStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -129,6 +130,38 @@ export class CatalogService {
     }
 
     return products.map((p) => ({ ...p, variants: variantsByProductId.get(p.id) ?? [] }));
+  }
+
+  async getSupplierProductsSummary(userId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    const [total, openPool] = await this.prisma.$transaction([
+      this.prisma.product.count({
+        where: { supplierId },
+      }),
+      this.prisma.pool.count({
+        where: {
+          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
+          variant: {
+            product: { supplierId },
+          },
+        },
+      }),
+    ]);
+
+    return { total, openPool };
+  }
+
+  async getLatestCatalogImport(userId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    const latest = await this.prisma.product.findFirst({
+      where: { supplierId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+
+    return { lastImportedAt: latest?.createdAt ?? null };
   }
 
   async createProduct(
@@ -266,4 +299,3 @@ export class CatalogService {
     return { imported: results, errors };
   }
 }
-
