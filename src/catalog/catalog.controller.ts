@@ -5,10 +5,26 @@ import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
 const createProductSchema = z.object({
-  product_name: z.string().min(1).max(200),
+  product_name: z.string().min(1).max(200).optional(),
+  name: z.string().min(1).max(200).optional(),
   description: z.string().max(2000).optional(),
   category: z.string().max(100).optional(),
-});
+  currency: z.string().max(10).optional(),
+})
+  .superRefine((data, ctx) => {
+    if (!data.product_name && !data.name) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['product_name'],
+        message: 'product_name is required',
+      });
+    }
+  })
+  .transform((data) => ({
+    product_name: data.product_name ?? data.name ?? '',
+    description: data.description,
+    category: data.category,
+  }));
 
 const createVariantSchema = z.object({
   productId: z.string().uuid(),
@@ -60,6 +76,11 @@ export class CatalogController {
   @Post('/supplier/products')
   async createProduct(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
+    console.log(
+      `${new Date().toISOString()} - [catalog] POST /supplier/products body:`,
+      body,
+    );
+
     const parsed = createProductSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException({
@@ -71,7 +92,9 @@ export class CatalogController {
         })),
       });
     }
-    return this.catalogService.createProduct(userId, parsed.data);
+
+    const created = await this.catalogService.createProduct(userId, parsed.data);
+    return { id: created.id };
   }
 
   @Post('/supplier/variants')
