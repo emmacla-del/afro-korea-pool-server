@@ -8,6 +8,7 @@ import { PoolsModule } from './pools/pools.module';
 import { SupplierModule } from './supplier/supplier.module';
 import { DevModule } from './dev/dev.module';
 import { CatalogModule } from './catalog/catalog.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { CatalogModule } from './catalog/catalog.module';
     SupplierModule,
     DevModule,
     CatalogModule,
+    AuthModule,
   ],
   controllers: [HealthController],
 })

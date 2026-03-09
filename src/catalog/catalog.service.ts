@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class CatalogService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   private async getSupplierIdForUser(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -19,6 +19,64 @@ export class CatalogService {
     }
     return user.supplier.id;
   }
+
+  // ==================== NEW: Product creation with images ====================
+  async createProductWithImages(
+    userId: string,
+    data: {
+      product_name: string;
+      description?: string;
+      sku: string;
+      price: number;
+      stock: number;
+      currency: string;
+    },
+    files: Express.Multer.File[],
+  ) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    // Use a transaction to ensure all related records are created atomically
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create the product
+      const product = await tx.product.create({
+        data: {
+          id: randomUUID(),
+          supplierId,
+          title: data.product_name,
+          description: data.description ?? null,
+          // category? you could add if needed
+        },
+      });
+
+      // 2. Create the first variant
+      const variant = await tx.productVariant.create({
+        data: {
+          id: randomUUID(),
+          productId: product.id,
+          sku: data.sku,
+          unitPriceXaf: Math.round(data.price),
+          thresholdQty: data.stock,
+          leadTimeDays: 14, // default – you could make it configurable
+          isActive: true,
+        },
+      });
+
+      // 3. Save image records if files were uploaded
+      if (files && files.length > 0) {
+        // Assuming you have an Image model – if not, create it (see instructions below)
+        const imageData = files.map(file => ({
+          id: randomUUID(),
+          productId: product.id,
+          url: `/uploads/products/${file.filename}`,
+          order: null, // optional
+        }));
+        await tx.image.createMany({ data: imageData });
+      }
+
+      return product;
+    });
+  }
+  // ============================================================================
 
   async listPublicProducts() {
     const products = await this.prisma.product.findMany({
@@ -64,15 +122,15 @@ export class CatalogService {
       variantIds.length === 0
         ? []
         : await this.prisma.pool.findMany({
-            where: {
-              variantId: { in: variantIds },
-              status: {
-                in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
-              },
+          where: {
+            variantId: { in: variantIds },
+            status: {
+              in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
             },
-            distinct: ['variantId'],
-            orderBy: { createdAt: 'desc' },
-          });
+          },
+          distinct: ['variantId'],
+          orderBy: { createdAt: 'desc' },
+        });
 
     const poolByVariantId = new Map<string, any>();
     for (const p of pools) {
@@ -108,12 +166,15 @@ export class CatalogService {
 
   async listSupplierProducts(userId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
+    return this.fetchSupplierProductsWithVariants(supplierId);
+  }
+
+  private async fetchSupplierProductsWithVariants(supplierId: string) {
     const products = await this.prisma.product.findMany({
       where: { supplierId },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });
-
     if (products.length === 0) return [];
 
     const productIds = products.map((p) => p.id);
@@ -122,14 +183,47 @@ export class CatalogService {
       orderBy: { createdAt: 'desc' },
     });
 
+    const variantIds = variants.map((v) => v.id);
+    const pools =
+      variantIds.length === 0
+        ? []
+        : await this.prisma.pool.findMany({
+          where: {
+            variantId: { in: variantIds },
+            status: {
+              in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
+            },
+          },
+          distinct: ['variantId'],
+          orderBy: { createdAt: 'desc' },
+        });
+
+    const poolByVariantId = new Map<string, any>();
+    for (const p of pools) {
+      poolByVariantId.set(p.variantId, {
+        id: p.id,
+        status: p.status,
+        committedQty: p.committedQty,
+        thresholdQtySnapshot: p.thresholdQtySnapshot,
+        deadlineAt: p.deadlineAt,
+        paymentWindowEndsAt: p.paymentWindowEndsAt,
+      });
+    }
+
     const variantsByProductId = new Map<string, any[]>();
     for (const v of variants) {
       const list = variantsByProductId.get(v.productId) ?? [];
-      list.push(v);
+      list.push({
+        ...v,
+        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
+      });
       variantsByProductId.set(v.productId, list);
     }
 
-    return products.map((p) => ({ ...p, variants: variantsByProductId.get(p.id) ?? [] }));
+    return products.map((p) => ({
+      ...p,
+      variants: variantsByProductId.get(p.id) ?? [],
+    }));
   }
 
   async getSupplierProductsSummary(userId: string) {
@@ -197,7 +291,6 @@ export class CatalogService {
       where: { id: input.productId },
     });
     if (!product) throw new NotFoundException('Product not found');
-    // FIXED: Issue #11 - Verify product belongs to THIS supplier (not another)
     if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
 
     try {
@@ -221,6 +314,117 @@ export class CatalogService {
     }
   }
 
+  async updateSupplierProduct(
+    userId: string,
+    productId: string,
+    input: { name?: string; price?: number; stock?: number; isActive?: boolean },
+  ) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, supplierId: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
+
+    if (
+      input.name !== undefined ||
+      input.isActive !== undefined
+    ) {
+      const data: { title?: string; isActive?: boolean } = {};
+      if (input.name !== undefined) data.title = input.name;
+      if (input.isActive !== undefined) data.isActive = input.isActive;
+
+      await this.prisma.product.update({
+        where: { id: productId },
+        data,
+      });
+    }
+
+    if (input.price !== undefined || input.stock !== undefined) {
+      const targetVariant = await this.prisma.productVariant.findFirst({
+        where: { productId },
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      if (!targetVariant) {
+        throw new BadRequestException('No variant found for this product');
+      }
+
+      const data: { unitPriceXaf?: number; thresholdQty?: number } = {};
+      if (input.price !== undefined) data.unitPriceXaf = Math.round(input.price);
+      if (input.stock !== undefined) data.thresholdQty = input.stock;
+
+      await this.prisma.productVariant.update({
+        where: { id: targetVariant.id },
+        data,
+      });
+    }
+
+    return this.getSupplierProductById(supplierId, productId);
+  }
+
+  async updateSupplierProductPoolStatus(
+    userId: string,
+    productId: string,
+    poolStatus: 'OPEN' | 'CLOSED',
+  ) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { id: true, supplierId: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
+
+    const variant = await this.prisma.productVariant.findFirst({
+      where: { productId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!variant) throw new BadRequestException('No variant found for this product');
+
+    if (poolStatus === 'CLOSED') {
+      await this.prisma.pool.updateMany({
+        where: {
+          variantId: variant.id,
+          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
+        },
+        data: { status: PoolStatus.EXPIRED },
+      });
+    } else {
+      const existingOpenPool = await this.prisma.pool.findFirst({
+        where: {
+          variantId: variant.id,
+          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
+        },
+      });
+
+      if (!existingOpenPool) {
+        const now = new Date();
+        const deadlineAt = new Date(now.getTime() + 72 * 60 * 60 * 1000);
+        await this.prisma.pool.create({
+          data: {
+            id: randomUUID(),
+            variantId: variant.id,
+            status: PoolStatus.OPEN,
+            thresholdQtySnapshot: variant.thresholdQty,
+            unitPriceXafSnapshot: variant.unitPriceXaf,
+            deadlineAt,
+          },
+        });
+      }
+    }
+
+    return this.getSupplierProductById(supplierId, productId);
+  }
+
+  private async getSupplierProductById(supplierId: string, productId: string) {
+    const products = await this.fetchSupplierProductsWithVariants(supplierId);
+    const product = products.find((p) => p.id === productId);
+    if (!product) throw new NotFoundException('Product not found');
+    return product;
+  }
+
   async importCatalog(
     userId: string,
     input: {
@@ -237,7 +441,6 @@ export class CatalogService {
       }>;
     },
   ) {
-    // FIXED: Issue #11 - Verify user is a supplier and get their supplier ID
     const supplierId = await this.getSupplierIdForUser(userId);
 
     const results: Array<{ productId: string; createdVariants: number }> = [];
@@ -279,7 +482,7 @@ export class CatalogService {
         });
 
         results.push({ productId: created.id, createdVariants: productInput.variants.length });
-        } catch (err: any) {
+      } catch (err: any) {
         const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
         if (err?.code === 'P2002' || (message.toLowerCase().includes('unique') && message.toLowerCase().includes('sku'))) {
           errors.push({

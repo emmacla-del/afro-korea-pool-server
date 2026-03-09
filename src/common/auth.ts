@@ -5,6 +5,9 @@ import { FastifyRequest } from 'fastify';
 const UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function requireUserId(req: FastifyRequest): string {
+  const fromJwt = getUserIdFromJwt(req);
+  if (fromJwt) return fromJwt;
+
   const headerValue = req.headers['x-user-id'];
   if (!headerValue) {
     throw new UnauthorizedException('Missing x-user-id header (MVP auth - migrate to JWT)');
@@ -20,6 +23,19 @@ export function requireUserId(req: FastifyRequest): string {
     throw new BadRequestException('Invalid user ID format (must be valid UUID)');
   }
 
+  return userId;
+}
+
+export function getUserIdFromJwt(req: FastifyRequest): string | null {
+  const user = (req as FastifyRequest & { user?: JwtPayload & { userId?: string } }).user;
+  if (!user) return null;
+
+  const rawUserId = user.sub ?? user.userId;
+  if (!rawUserId || typeof rawUserId !== 'string') return null;
+  const userId = rawUserId.trim();
+  if (!UUID_V4_REGEX.test(userId)) {
+    throw new BadRequestException('Invalid user ID format in JWT');
+  }
   return userId;
 }
 
@@ -41,8 +57,8 @@ export function requireDevAdminSecret(req: FastifyRequest): void {
 // FIXED: Issue #10 - Add JWT token validation helper (prepare for future JWT implementation)
 export interface JwtPayload {
   sub: string; // user ID
-  email?: string;
-  role?: 'CUSTOMER' | 'SUPPLIER';
+  phone?: string | null;
+  role?: 'CUSTOMER' | 'SUPPLIER' | 'ADMIN';
   iat?: number;
   exp?: number;
 }

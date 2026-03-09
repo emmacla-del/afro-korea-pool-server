@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireDevAdminSecret, requireUserId } from '../common/auth';
 import { OrdersService } from './orders.service';
 import { z } from 'zod';
@@ -14,18 +15,21 @@ export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get('/me/orders')
+  @UseGuards(JwtAuthGuard)
   async myOrders(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.ordersService.listOrdersForUser(userId);
   }
 
   @Get('/orders/:id')
+  @UseGuards(JwtAuthGuard)
   async getOrder(@Req() req: FastifyRequest, @Param('id') orderId: string) {
     const userId = requireUserId(req);
     return this.ordersService.getOrderForUser({ userId, orderId });
   }
 
   @Post('/orders/direct')
+  @UseGuards(JwtAuthGuard)
   async createDirectOrder(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = directOrderSchema.parse(body);

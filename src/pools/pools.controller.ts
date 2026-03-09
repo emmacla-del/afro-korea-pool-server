@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireUserId } from '../common/auth';
 import { PoolsService } from './pools.service';
 
@@ -32,6 +33,7 @@ export class PoolsController {
   }
 
   @Post('/pools/:id/commit')
+  @UseGuards(JwtAuthGuard)
   async commit(@Req() req: FastifyRequest, @Param('id') poolId: string, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = commitSchema.parse(body);

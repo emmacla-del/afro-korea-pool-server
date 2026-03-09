@@ -1,23 +1,26 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class DevService {
   constructor(private prisma: PrismaService) {}
 
-  async createUser(input: { phone?: string; role?: 'CUSTOMER' | 'SUPPLIER' | 'ADMIN' }) {
+  async createUser(input: { phone?: string; password?: string; role?: 'CUSTOMER' | 'SUPPLIER' | 'ADMIN' }) {
     const id = randomUUID();
     const role = (input.role ?? 'CUSTOMER').toUpperCase() as 'CUSTOMER' | 'SUPPLIER' | 'ADMIN';
     if (role !== 'CUSTOMER' && role !== 'SUPPLIER' && role !== 'ADMIN') {
       throw new BadRequestException('Invalid role');
     }
+    const passwordHash = await bcrypt.hash(input.password ?? 'dev-password', 10);
 
     try {
       const created = await this.prisma.user.create({
         data: {
           id,
           phone: input.phone ?? null,
+          password: passwordHash,
           role,
         },
       });
@@ -52,12 +55,14 @@ export class DevService {
     return supplier;
   }
 
-  async seedSupplier(input: { displayName: string; phone?: string }) {
+  async seedSupplier(input: { displayName: string; phone?: string; password?: string }) {
+    const passwordHash = await bcrypt.hash(input.password ?? 'dev-password', 10);
     const userId = randomUUID();
     const user = await this.prisma.user.create({
       data: {
         id: userId,
         phone: input.phone ?? null,
+        password: passwordHash,
         role: 'SUPPLIER',
       },
     });

@@ -28,7 +28,6 @@ This folder is a minimal backend for the “pooling / threshold” e-commerce MV
 
 ## What’s intentionally MVP / missing
 
-- Real authentication (MVP uses `x-user-id` header)
 - Real payments integration (there’s a DEV endpoint to mark an order as paid)
 - Catalog upload endpoints (schema supports products/variants, endpoints can be added next)
 - Multi-variant pools, partial shipment, refunds, dispute/chargeback handling
@@ -61,42 +60,53 @@ This folder is a minimal backend for the “pooling / threshold” e-commerce MV
 
 Server starts on `https://afropool-backend.onrender.com` in production (or `http://localhost:3000` when running locally).
 
-## API quickstart (manual MVP auth)
+## API quickstart (JWT auth)
 
-Use any UUID as your user id for now (until auth is implemented):
+1) Register:
+
+- `POST /auth/register` body: `{ "phone": "+237600000001", "password": "secret123", "role": "SUPPLIER" }`
+
+2) Login:
+
+- `POST /auth/login` body: `{ "phone": "+237600000001", "password": "secret123" }`
+- returns `{ access_token, user }`
+
+3) Use bearer token on protected routes:
+
+- `Authorization: Bearer <access_token>`
 
 - DEV: seed a supplier user:
   - `POST /dev/seed/supplier` header: `x-admin-secret: <DEV_ADMIN_SECRET>` body: `{ "displayName": "Lagos Textiles" }`
   - returns `{ supplierUserId, supplierId }`
 
 - Supplier: import products (bulk JSON):
-  - `POST /supplier/catalog/import` header: `x-user-id: <supplierUserId>` body:
+  - `POST /supplier/catalog/import` header: `Authorization: Bearer <token>` body:
     - `{ "products": [ { "title": "...", "category": "...", "variants": [ { "sku": "...", "unitPriceXaf": 25000, "thresholdQty": 50 } ] } ] }`
 
 - Supplier: list my products:
-  - `GET /supplier/products` header: `x-user-id: <supplierUserId>`
+  - `GET /supplier/products` header: `Authorization: Bearer <token>`
 
 - Create pool:
   - `POST /pools` body: `{ "variantId": "<uuid>", "deadlineAt": "2026-02-06T12:00:00.000Z" }`
 
 - Commit units:
-  - `POST /pools/:id/commit` header: `x-user-id: <uuid>` body: `{ "qty": 10 }`
+  - `POST /pools/:id/commit` header: `Authorization: Bearer <token>` body: `{ "qty": 10 }`
 
 - Direct purchase (skip pooling):
-  - `POST /orders/direct` header: `x-user-id: <uuid>` body: `{ "variantId": "<uuid>", "qty": 2 }`
+  - `POST /orders/direct` header: `Authorization: Bearer <token>` body: `{ "variantId": "<uuid>", "qty": 2 }`
 
 - List my orders:
-  - `GET /me/orders` header: `x-user-id: <uuid>`
+  - `GET /me/orders` header: `Authorization: Bearer <token>`
 
 - DEV: mark an order as paid:
   - `POST /dev/orders/:id/mark-paid` header: `x-admin-secret: <DEV_ADMIN_SECRET>`
 
 - Supplier: list purchase orders:
-  - `GET /supplier/purchase-orders` header: `x-user-id: <supplier-user-uuid>`
+  - `GET /supplier/purchase-orders` header: `Authorization: Bearer <token>`
 
 ## Next (recommended)
 
-1) Add real auth (phone OTP) and role-based access (customer vs supplier).
+1) Add password reset / phone OTP verification.
 2) Implement catalog upload (CSV) for suppliers and public catalog browse for customers.
 3) Integrate the first payment provider (MoMo/card), with idempotent webhooks.
 4) Add realtime updates for pool progress (SSE/WebSocket).

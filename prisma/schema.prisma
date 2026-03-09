@@ -57,6 +57,7 @@ enum PurchaseOrderStatus {
 model User {
   id        String   @id @default(uuid())
   phone     String?  @unique
+  password  String
   role      UserRole @default(CUSTOMER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -91,6 +92,7 @@ model Product {
 
   supplier Supplier       @relation(fields: [supplierId], references: [id])
   variants ProductVariant[]
+  images   Image[]         // 👈 NEW: relation to images
 }
 
 model ProductVariant {
@@ -107,6 +109,19 @@ model ProductVariant {
   product Product @relation(fields: [productId], references: [id])
   pools   Pool[]
   orders  Order[]
+}
+
+// 👇 NEW MODEL: Image
+model Image {
+  id        String   @id @default(uuid())
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId String
+  url       String
+  order     Int?     // optional: for sorting images
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([productId])
 }
 
 model Pool {

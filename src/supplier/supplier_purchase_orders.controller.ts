@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireUserId } from '../common/auth';
 import { SupplierService } from './supplier.service';
 
@@ -9,6 +10,7 @@ const shipSchema = z.object({
 });
 
 @Controller()
+@UseGuards(JwtAuthGuard)
 export class SupplierPurchaseOrdersController {
   constructor(private readonly supplierService: SupplierService) {}
 

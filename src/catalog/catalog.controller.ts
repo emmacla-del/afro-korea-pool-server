@@ -1,6 +1,17 @@
-import { BadRequestException, Body, Controller, Get, Post, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
@@ -56,9 +67,20 @@ const importSchema = z.object({
     .min(1),
 });
 
+const patchProductSchema = z.object({
+  name: z.string().min(1).max(200).optional(),
+  price: z.number().min(0).optional(),
+  stock: z.number().int().min(0).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const patchProductStatusSchema = z.object({
+  poolStatus: z.enum(['OPEN', 'CLOSED']),
+});
+
 @Controller()
 export class CatalogController {
-  constructor(private readonly catalogService: CatalogService) {}
+  constructor(private readonly catalogService: CatalogService) { }
 
   // Public browse (customer side)
   @Get('/products')
@@ -68,24 +90,28 @@ export class CatalogController {
 
   // Supplier side (requires x-user-id of a SUPPLIER user)
   @Get('/supplier/products')
+  @UseGuards(JwtAuthGuard)
   async listSupplierProducts(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.listSupplierProducts(userId);
   }
 
   @Get('/supplier/products/summary')
+  @UseGuards(JwtAuthGuard)
   async supplierProductsSummary(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.getSupplierProductsSummary(userId);
   }
 
   @Get('/supplier/catalog-imports/latest')
+  @UseGuards(JwtAuthGuard)
   async latestCatalogImport(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.getLatestCatalogImport(userId);
   }
 
   @Post('/supplier/products')
+  @UseGuards(JwtAuthGuard)
   async createProduct(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     console.log(
@@ -110,13 +136,43 @@ export class CatalogController {
   }
 
   @Post('/supplier/variants')
+  @UseGuards(JwtAuthGuard)
   async createVariant(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = createVariantSchema.parse(body);
     return this.catalogService.createVariant(userId, parsed);
   }
 
+  @Patch('/supplier/products/:id')
+  @UseGuards(JwtAuthGuard)
+  async patchProduct(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const userId = requireUserId(req);
+    const parsed = patchProductSchema.parse(body);
+    return this.catalogService.updateSupplierProduct(userId, id, parsed);
+  }
+
+  @Patch('/supplier/products/:id/status')
+  @UseGuards(JwtAuthGuard)
+  async patchProductStatus(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const userId = requireUserId(req);
+    const parsed = patchProductStatusSchema.parse(body);
+    return this.catalogService.updateSupplierProductPoolStatus(
+      userId,
+      id,
+      parsed.poolStatus,
+    );
+  }
+
   @Post('/supplier/catalog/import')
+  @UseGuards(JwtAuthGuard)
   async importCatalog(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = importSchema.parse(body);

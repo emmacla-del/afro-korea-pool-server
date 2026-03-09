@@ -6,6 +6,7 @@ import { DevService } from './dev.service';
 
 const createUserSchema = z.object({
   phone: z.string().min(3).max(50).optional(),
+  password: z.string().min(6).max(200).optional(),
   role: z.enum(['CUSTOMER', 'SUPPLIER', 'ADMIN']).optional(),
 });
 
@@ -17,6 +18,7 @@ const createSupplierSchema = z.object({
 const seedSupplierSchema = z.object({
   displayName: z.string().min(1).max(200).default('Demo Supplier'),
   phone: z.string().min(3).max(50).optional(),
+  password: z.string().min(6).max(200).optional(),
 });
 
 @Controller()
@@ -44,4 +46,3 @@ export class DevController {
     return this.devService.seedSupplier(parsed);
   }
 }
-
