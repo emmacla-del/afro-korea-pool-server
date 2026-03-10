@@ -12,7 +12,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "postbuild": "cpx \"package.json\" \"dist\" && cpx \"prisma/**/*\" \"dist/prisma\"",
+    "postbuild": "cpx \"package.json\" \"dist\" && cpx \"prisma/**/*\" \"dist/prisma\""
   },
   "keywords": [],
   "author": "",
