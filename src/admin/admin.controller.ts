@@ -1,24 +1,14 @@
-import { Controller, Get, Patch, Param, UseGuards, ForbiddenException, Req } from '@nestjs/common';
-import { FastifyRequest } from 'fastify';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Controller, Get, Patch, Param, UseGuards } from '@nestjs/common';
+import { AdminGuard } from '../auth/admin.guard';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('admin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(AdminGuard)
 export class AdminController {
     constructor(private prisma: PrismaService) { }
 
-    private async checkAdmin(userId: string) {
-        const user = await this.prisma.user.findUnique({ where: { id: userId } });
-        if (!user || user.role !== 'ADMIN') {
-            throw new ForbiddenException('Admin access required');
-        }
-    }
-
     @Get('suppliers/pending')
-    async getPendingSuppliers(@Req() req: FastifyRequest) {
-        const userId = (req as any).user?.sub; // type assertion
-        await this.checkAdmin(userId);
+    async getPendingSuppliers() {
         return this.prisma.supplier.findMany({
             where: { verificationStatus: 'PENDING' },
             include: { owner: { select: { phone: true } } },
@@ -26,9 +16,7 @@ export class AdminController {
     }
 
     @Patch('suppliers/:id/verify')
-    async verifySupplier(@Req() req: FastifyRequest, @Param('id') supplierId: string) {
-        const userId = (req as any).user?.sub;
-        await this.checkAdmin(userId);
+    async verifySupplier(@Param('id') supplierId: string) {
         return this.prisma.supplier.update({
             where: { id: supplierId },
             data: { verificationStatus: 'VERIFIED' },
@@ -36,9 +24,7 @@ export class AdminController {
     }
 
     @Patch('suppliers/:id/reject')
-    async rejectSupplier(@Req() req: FastifyRequest, @Param('id') supplierId: string) {
-        const userId = (req as any).user?.sub;
-        await this.checkAdmin(userId);
+    async rejectSupplier(@Param('id') supplierId: string) {
         return this.prisma.supplier.update({
             where: { id: supplierId },
             data: { verificationStatus: 'REJECTED' },

@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerModule } from '@nestjs/throttler'; // <-- ADD THIS
-import { LoggerModule } from 'nestjs-pino'; // <-- ADD THIS
+import { ThrottlerModule } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
@@ -11,16 +11,18 @@ import { SupplierModule } from './supplier/supplier.module';
 import { DevModule } from './dev/dev.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { AuthModule } from './auth/auth.module';
+import { AdminController } from './admin/admin.controller';   // <-- NEW
+import { AdminGuard } from './auth/admin.guard';             // <-- NEW
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot([{   // <-- ADD THIS
+    ThrottlerModule.forRoot([{
       ttl: 60000,
       limit: 10,
     }]),
-    LoggerModule.forRoot({       // <-- ADD THIS
+    LoggerModule.forRoot({
       pinoHttp: {
         transport: process.env.NODE_ENV !== 'production'
           ? { target: 'pino-pretty' }
@@ -36,6 +38,12 @@ import { AuthModule } from './auth/auth.module';
     CatalogModule,
     AuthModule,
   ],
-  controllers: [HealthController],
+  controllers: [
+    HealthController,
+    AdminController,   // <-- NEW
+  ],
+  providers: [
+    AdminGuard,        // <-- NEW
+  ],
 })
 export class AppModule { }
