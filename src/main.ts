@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
+import multipart from '@fastify/multipart'; // <-- ADD THIS IMPORT
 import { AppModule } from './app.module';
 import { initDatabase } from './db';
 
@@ -36,6 +37,16 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // ========== ADD THIS REGISTRATION ==========
+  // Register multipart plugin for file uploads
+  await app.register(multipart, {
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10 MB per file
+      files: 10,
+    },
+  });
+  // ===========================================
+
   // Initialize database (uses Prisma via PrismaService)
   console.log(`${new Date().toISOString()} - DATABASE_URL present: ${Boolean(process.env.DATABASE_URL)}`);
   console.log(`${new Date().toISOString()} - Attempting database connection...`);
@@ -54,7 +65,6 @@ async function bootstrap() {
 
   const protocol = process.env.NODE_ENV === 'production' ? 'https' : 'http';
   console.log(`🚀 Server running at ${protocol}://0.0.0.0:${port}`);
-
 }
 
 void bootstrap();
