@@ -15,28 +15,23 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
-const createProductSchema = z.object({
-  product_name: z.string().min(1).max(200).optional(),
-  name: z.string().min(1).max(200).optional(),
-  description: z.string().max(2000).optional(),
-  category: z.string().max(100).optional(),
-  currency: z.string().max(10).optional(),
-})
-  .superRefine((data, ctx) => {
-    if (!data.product_name && !data.name) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['product_name'],
-        message: 'product_name is required',
-      });
-    }
-  })
-  .transform((data) => ({
-    product_name: data.product_name ?? data.name ?? '',
-    description: data.description,
-    category: data.category,
-  }));
+// Schema for multipart fields (all strings from form-data)
+const createProductMultipartSchema = z.object({
+  product_name: z.string().min(1, 'Product name is required'),
+  description: z.string().optional(),
+  sku: z.string().min(1, 'SKU is required'),
+  price: z
+    .string()
+    .transform((v) => parseFloat(v))
+    .refine((v) => !isNaN(v) && v >= 0, { message: 'Price must be a valid number >= 0' }),
+  stock: z
+    .string()
+    .transform((v) => parseInt(v, 10))
+    .refine((v) => Number.isInteger(v) && v >= 1, { message: 'Stock must be a positive integer' }),
+  currency: z.string().max(10).default('XAF').optional(),
+});
 
+// Existing schemas (unchanged)
 const createVariantSchema = z.object({
   productId: z.string().uuid(),
   sku: z.string().min(1).max(80),
@@ -46,25 +41,21 @@ const createVariantSchema = z.object({
 });
 
 const importSchema = z.object({
-  products: z
-    .array(
-      z.object({
-        product_name: z.string().min(1).max(200),
-        description: z.string().max(2000).optional(),
-        category: z.string().max(100).optional(),
-        variants: z
-          .array(
-            z.object({
-              sku: z.string().min(1).max(80),
-              unitPriceXaf: z.number().int().min(0).max(2_000_000_000),
-              thresholdQty: z.number().int().min(1).max(100000),
-              leadTimeDays: z.number().int().min(1).max(365).optional(),
-            }),
-          )
-          .min(1),
-      }),
-    )
-    .min(1),
+  products: z.array(
+    z.object({
+      product_name: z.string().min(1).max(200),
+      description: z.string().max(2000).optional(),
+      category: z.string().max(100).optional(),
+      variants: z.array(
+        z.object({
+          sku: z.string().min(1).max(80),
+          unitPriceXaf: z.number().int().min(0).max(2_000_000_000),
+          thresholdQty: z.number().int().min(1).max(100000),
+          leadTimeDays: z.number().int().min(1).max(365).optional(),
+        }),
+      ).min(1),
+    }),
+  ).min(1),
 });
 
 const patchProductSchema = z.object({
@@ -88,7 +79,7 @@ export class CatalogController {
     return this.catalogService.listPublicProducts();
   }
 
-  // Supplier side (requires x-user-id of a SUPPLIER user)
+  // Supplier side (requires authentication)
   @Get('/supplier/products')
   @UseGuards(JwtAuthGuard)
   async listSupplierProducts(@Req() req: FastifyRequest) {
@@ -110,31 +101,61 @@ export class CatalogController {
     return this.catalogService.getLatestCatalogImport(userId);
   }
 
+  // ==================== NEW: Multipart product creation with images ====================
   @Post('/supplier/products')
   @UseGuards(JwtAuthGuard)
-  async createProduct(@Req() req: FastifyRequest, @Body() body: unknown) {
+  async createProduct(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
+    const parts = (req as any).parts(); // type assertion – works at runtime
+    const fields: Record<string, any> = {};
+    const files: Array<{ buffer: Buffer; filename: string; mimetype: string }> = [];
+
+    for await (const part of parts) {
+      if (part.type === 'file') {
+        const buffer = await part.toBuffer();
+        files.push({
+          buffer,
+          filename: part.filename,
+          mimetype: part.mimetype,
+        });
+      } else {
+        fields[part.fieldname] = part.value;
+      }
+    }
+
     console.log(
-      `${new Date().toISOString()} - [catalog] POST /supplier/products body:`,
-      body,
+      `${new Date().toISOString()} - [catalog] POST /supplier/products fields:`,
+      fields,
     );
 
-    const parsed = createProductSchema.safeParse(body);
-    if (!parsed.success) {
+    const parseResult = createProductMultipartSchema.safeParse(fields);
+    if (!parseResult.success) {
       throw new BadRequestException({
         message: 'Validation failed',
-        errors: parsed.error.issues.map((issue) => ({
-          path: issue.path.join('.'),
-          message: issue.message,
-          code: issue.code,
-        })),
+        errors: parseResult.error.issues,
       });
     }
 
-    const created = await this.catalogService.createProduct(userId, parsed.data);
+    const { product_name, description, sku, price, stock, currency } = parseResult.data;
+
+    const created = await this.catalogService.createProductWithImages(
+      userId,
+      {
+        product_name,
+        description,
+        sku,
+        price,
+        stock,
+        currency: currency || 'XAF',
+      },
+      files,
+    );
+
     return { id: created.id };
   }
+  // ======================================================================================
 
+  // Other endpoints remain unchanged
   @Post('/supplier/variants')
   @UseGuards(JwtAuthGuard)
   async createVariant(@Req() req: FastifyRequest, @Body() body: unknown) {
@@ -164,11 +185,7 @@ export class CatalogController {
   ) {
     const userId = requireUserId(req);
     const parsed = patchProductStatusSchema.parse(body);
-    return this.catalogService.updateSupplierProductPoolStatus(
-      userId,
-      id,
-      parsed.poolStatus,
-    );
+    return this.catalogService.updateSupplierProductPoolStatus(userId, id, parsed.poolStatus);
   }
 
   @Post('/supplier/catalog/import')
