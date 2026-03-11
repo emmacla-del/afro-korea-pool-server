@@ -1,107 +1,55 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User, UserRole } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-
-interface AuthUserDto {
-  id: string;
-  phone: string | null;
-  role: UserRole;
-}
+import * as bcrypt from 'bcrypt';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly jwtService: JwtService,
-  ) {}
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+  ) { }
 
   async register(
     phone: string,
     password: string,
     role: UserRole,
-  ): Promise<{ access_token: string; user: AuthUserDto }> {
-    const normalizedPhone = normalizePhone(phone);
-    if (!normalizedPhone) {
-      throw new BadRequestException('Phone is required');
-    }
-    if (password.trim().length < 6) {
-      throw new BadRequestException('Password must be at least 6 characters');
-    }
-
-    const existing = await this.prisma.user.findUnique({
-      where: { phone: normalizedPhone },
-      select: { id: true },
-    });
-    if (existing) {
-      throw new ConflictException('Phone already registered');
-    }
-
-    const passwordHash = await bcrypt.hash(password, 10);
-
-    const created = await this.prisma.user.create({
-      data: {
-        phone: normalizedPhone,
-        password: passwordHash,
-        role,
-      },
+    supplierData?: {
+      displayName: string;
+      country: string;          // required for suppliers
+      city?: string;
+      businessRegNumber?: string;
+    },
+  ) {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await this.prisma.user.create({
+      data: { phone, password: hashedPassword, role },
     });
 
-    if (role === UserRole.SUPPLIER) {
+    if (role === 'SUPPLIER') {
+      if (!supplierData) {
+        throw new BadRequestException('Supplier data required');
+      }
       await this.prisma.supplier.create({
         data: {
-          ownerUserId: created.id,
-          displayName: normalizedPhone,
+          ownerUserId: user.id,
+          displayName: supplierData.displayName,
+          country: supplierData.country,
+          city: supplierData.city,
+          businessRegNumber: supplierData.businessRegNumber,
+          // verificationStatus defaults to 'PENDING'
         },
       });
     }
 
-    return this.login(created);
+    return this.login(user);
   }
 
-  async validateUser(phone: string, password: string): Promise<User> {
-    const normalizedPhone = normalizePhone(phone);
-    if (!normalizedPhone || !password) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const user = await this.prisma.user.findUnique({
-      where: { phone: normalizedPhone },
-    });
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    const isValidPassword = await bcrypt.compare(password, user.password);
-    if (!isValidPassword) {
-      throw new UnauthorizedException('Invalid credentials');
-    }
-
-    return user;
-  }
-
-  async login(user: Pick<User, 'id' | 'phone' | 'role'>): Promise<{
-    access_token: string;
-    user: AuthUserDto;
-  }> {
-    const payload = {
-      sub: user.id,
-      phone: user.phone,
-      role: user.role,
-    };
-
-    const accessToken = await this.jwtService.signAsync(payload, {
-      expiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
-    });
-
+  async login(user: any) {
+    const payload = { sub: user.id, phone: user.phone, role: user.role };
     return {
-      access_token: accessToken,
+      access_token: this.jwtService.sign(payload),
       user: {
         id: user.id,
         phone: user.phone,
@@ -109,8 +57,13 @@ export class AuthService {
       },
     };
   }
-}
 
-function normalizePhone(phone: string): string {
-  return phone.trim();
+  async validateUser(phone: string, password: string): Promise<any> {
+    const user = await this.prisma.user.findUnique({ where: { phone } });
+    if (user && (await bcrypt.compare(password, user.password))) {
+      const { password, ...result } = user;
+      return result;
+    }
+    return null;
+  }
 }

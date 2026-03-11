@@ -2,17 +2,15 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { UserRole } from '@prisma/client';
 
 @Injectable()
 export class DevService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
-  async createUser(input: { phone?: string; password?: string; role?: 'CUSTOMER' | 'SUPPLIER' | 'ADMIN' }) {
+  async createUser(input: { phone?: string; password?: string; role?: UserRole }) {
     const id = randomUUID();
-    const role = (input.role ?? 'CUSTOMER').toUpperCase() as 'CUSTOMER' | 'SUPPLIER' | 'ADMIN';
-    if (role !== 'CUSTOMER' && role !== 'SUPPLIER' && role !== 'ADMIN') {
-      throw new BadRequestException('Invalid role');
-    }
+    const role = input.role ?? 'CUSTOMER';
     const passwordHash = await bcrypt.hash(input.password ?? 'dev-password', 10);
 
     try {
@@ -50,6 +48,8 @@ export class DevService {
         id: supplierId,
         ownerUserId: input.ownerUserId,
         displayName: input.displayName,
+        country: 'Nigeria', // default for dev
+        // city and businessRegNumber optional – not provided here
       },
     });
     return supplier;
@@ -73,6 +73,7 @@ export class DevService {
         id: supplierId,
         ownerUserId: userId,
         displayName: input.displayName,
+        country: 'Nigeria', // default for dev
       },
     });
 
