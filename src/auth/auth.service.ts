@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -23,9 +23,20 @@ export class AuthService {
     },
   ) {
     const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await this.prisma.user.create({
-      data: { phone, password: hashedPassword, role },
-    });
+
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: { phone, password: hashedPassword, role },
+      });
+    } catch (error) {
+      // Cast error to any to access Prisma error properties
+      const prismaError = error as any;
+      if (prismaError.code === 'P2002') {
+        throw new ConflictException('Phone already registered');
+      }
+      throw error;
+    }
 
     if (role === 'SUPPLIER') {
       if (!supplierData) {
@@ -47,6 +58,9 @@ export class AuthService {
   }
 
   async login(user: any) {
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
     const payload = { sub: user.id, phone: user.phone, role: user.role };
     return {
       access_token: this.jwtService.sign(payload),
