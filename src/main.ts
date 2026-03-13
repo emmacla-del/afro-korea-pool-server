@@ -8,6 +8,8 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { initDatabase } from './db';
 import { initSentry } from './sentry.config';
+import { mkdirSync, existsSync } from 'fs'; // 👈 ADDED
+import { join } from 'path'; // 👈 ADDED
 
 async function bootstrap() {
   // Initialize Sentry (captures unhandled exceptions)
@@ -17,6 +19,15 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
   const bodyLimit = Number(process.env.JSON_BODY_LIMIT_BYTES ?? '') || 1024 * 1024;
+
+  // 👇 NEW: Ensure uploads directory exists
+  const uploadsDir = join(__dirname, '..', 'uploads');
+  if (!existsSync(uploadsDir)) {
+    mkdirSync(uploadsDir, { recursive: true });
+    console.log(`✅ Created uploads directory at ${uploadsDir}`);
+  } else {
+    console.log(`✅ Uploads directory already exists at ${uploadsDir}`);
+  }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
