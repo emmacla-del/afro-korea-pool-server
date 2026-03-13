@@ -121,6 +121,7 @@ export class CatalogService {
 
     const productIds = products.map((p) => p.id);
 
+    // Fetch variants
     const variants = await this.prisma.productVariant.findMany({
       where: {
         productId: { in: productIds },
@@ -129,11 +130,24 @@ export class CatalogService {
       orderBy: { createdAt: 'desc' },
     });
 
+    // Fetch images
+    const images = await this.prisma.image.findMany({
+      where: { productId: { in: productIds } },
+      orderBy: { order: 'asc' },
+    });
+
     const variantsByProductId = new Map<string, any[]>();
     for (const v of variants) {
       const list = variantsByProductId.get(v.productId) ?? [];
       list.push(v);
       variantsByProductId.set(v.productId, list);
+    }
+
+    const imagesByProductId = new Map<string, any[]>();
+    for (const img of images) {
+      const list = imagesByProductId.get(img.productId) ?? [];
+      list.push(img);
+      imagesByProductId.set(img.productId, list);
     }
 
     const variantIds = variants.map((v) => v.id);
@@ -185,6 +199,7 @@ export class CatalogService {
           ...v,
           pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
         })),
+        images: imagesByProductId.get(p.id) ?? [], // 👈 NEW: include images
       };
     });
   }
@@ -203,10 +218,32 @@ export class CatalogService {
     if (products.length === 0) return [];
 
     const productIds = products.map((p) => p.id);
+
+    // Fetch variants
     const variants = await this.prisma.productVariant.findMany({
       where: { productId: { in: productIds } },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Fetch images
+    const images = await this.prisma.image.findMany({
+      where: { productId: { in: productIds } },
+      orderBy: { order: 'asc' },
+    });
+
+    const variantsByProductId = new Map<string, any[]>();
+    for (const v of variants) {
+      const list = variantsByProductId.get(v.productId) ?? [];
+      list.push(v);
+      variantsByProductId.set(v.productId, list);
+    }
+
+    const imagesByProductId = new Map<string, any[]>();
+    for (const img of images) {
+      const list = imagesByProductId.get(img.productId) ?? [];
+      list.push(img);
+      imagesByProductId.set(img.productId, list);
+    }
 
     const variantIds = variants.map((v) => v.id);
     const pools =
@@ -235,19 +272,13 @@ export class CatalogService {
       });
     }
 
-    const variantsByProductId = new Map<string, any[]>();
-    for (const v of variants) {
-      const list = variantsByProductId.get(v.productId) ?? [];
-      list.push({
-        ...v,
-        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
-      });
-      variantsByProductId.set(v.productId, list);
-    }
-
     return products.map((p) => ({
       ...p,
-      variants: variantsByProductId.get(p.id) ?? [],
+      variants: (variantsByProductId.get(p.id) ?? []).map((v) => ({
+        ...v,
+        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
+      })),
+      images: imagesByProductId.get(p.id) ?? [], // 👈 NEW: include images
     }));
   }
 
