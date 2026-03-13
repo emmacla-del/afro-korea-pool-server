@@ -1,17 +1,25 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { PoolStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
 import { PoolsService } from './pools.service';
 
 @Injectable()
 export class PoolsSchedulerService {
   private readonly logger = new Logger(PoolsSchedulerService.name);
+  private _ready = false;
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => PoolsService))
     private readonly poolsService: PoolsService,
-  ) {}
+  ) {
+    // Verified: poolsService is now correctly injected
+    console.log('✅ PoolsSchedulerService constructor, poolsService exists:', !!this.poolsService);
+
+    // Warm-up period to ensure DB and other services are fully settled
+    setTimeout(() => {
+      this._ready = true;
+      this.logger.log('Scheduler is now active');
+    }, 30_000);
+  }
 
   private isWorkerEnabled() {
     const raw = process.env.JOB_WORKER_ENABLED ?? 'true';
@@ -22,34 +30,18 @@ export class PoolsSchedulerService {
   async tick() {
     if (!this.isWorkerEnabled()) return;
 
-    const now = new Date();
-
-    const expiredCandidates = await this.prisma.pool.findMany({
-      where: { status: PoolStatus.OPEN, deadlineAt: { lte: now } },
-      select: { id: true },
-      take: 50,
-    });
-
-    for (const pool of expiredCandidates) {
-      try {
-        await this.poolsService.expirePoolIfPastDeadline(pool.id);
-      } catch (err) {
-        this.logger.warn({ poolId: pool.id, err }, 'expirePoolIfPastDeadline failed');
-      }
+    // Safety check: ensure service is ready and dependency is not null
+    if (!this._ready || !this.poolsService) {
+      return;
     }
 
-    const finalizeCandidates = await this.prisma.pool.findMany({
-      where: { status: PoolStatus.PAYMENT_WINDOW, paymentWindowEndsAt: { lte: now } },
-      select: { id: true },
-      take: 50,
-    });
-
-    for (const pool of finalizeCandidates) {
-      try {
-        await this.poolsService.finalizePoolIfNeeded(pool.id);
-      } catch (err) {
-        this.logger.warn({ poolId: pool.id, err }, 'finalizePoolIfNeeded failed');
-      }
+    try {
+      await this.poolsService.expireOpenPastDeadline();
+      await this.poolsService.finalizePaymentWindowsPastDeadline();
+    } catch (error) {
+      // Fixes the TypeScript "unknown" error type-safety check
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Error during scheduler tick: ${errorMessage}`);
     }
   }
 }

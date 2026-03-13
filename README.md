@@ -110,3 +110,87 @@ Server starts on `https://afropool-backend.onrender.com` in production (or `http
 2) Implement catalog upload (CSV) for suppliers and public catalog browse for customers.
 3) Integrate the first payment provider (MoMo/card), with idempotent webhooks.
 4) Add realtime updates for pool progress (SSE/WebSocket).
+
+
+📘 Updated README
+Server Project
+Setup
+Prerequisites
+Node.js v18+
+
+PostgreSQL (or use Render PostgreSQL)
+
+npm or yarn
+
+Environment Variables
+Create a .env file in the server/ root with:
+
+env
+DATABASE_URL="postgresql://user:pass@host:port/db?sslmode=no-verify"
+PORT=3000
+JWT_SECRET=your-secret
+# ... other variables
+Installation
+bash
+npm install
+Database Migrations
+Normal Flow (Development)
+bash
+npx prisma migrate dev --name init
+Production Deployment
+bash
+npx prisma migrate deploy
+npx prisma generate
+Handling Custom prisma.config.ts
+If you have a custom Prisma config, the CLI may ignore .env. Temporarily rename it:
+
+bash
+Move-Item prisma.config.ts prisma.config.ts.bak
+Then run migration commands normally. Restore afterward:
+
+bash
+Move-Item prisma.config.ts.bak prisma.config.ts
+Troubleshooting BOM Errors
+If you encounter syntax error at or near "", your migration file may contain a UTF-8 BOM. Remove it using PowerShell:
+
+powershell
+$path = "prisma/migrations/[migration_name]/migration.sql"
+$content = Get-Content -Path $path -Raw -Encoding UTF8
+if ($content[0] -eq 0xFEFF) { $content = $content.Substring(1) }
+[System.IO.File]::WriteAllText($path, $content, (New-Object System.Text.UTF8Encoding $false))
+Dealing with Failed Migrations
+If a migration fails, mark it as rolled back before retrying:
+
+bash
+npx prisma migrate resolve --rolled-back <migration_name>
+After fixing the cause, deploy again:
+
+bash
+npx prisma migrate deploy
+Manual SQL Execution
+To apply raw SQL without affecting the migration history:
+
+bash
+echo "SQL_STATEMENT" | npx prisma db execute --stdin --url="$DATABASE_URL"
+Running the Server
+bash
+npm run dev
+The server will start on http://localhost:3000.
+
+Scheduler Notes
+The PoolsSchedulerService runs every 15 seconds to expire pools and finalize payment windows.
+
+If you see Cannot read properties of undefined (reading 'expireOpenPastDeadline'), ensure forwardRef is used as described above.
+
+Known Issues & Workarounds
+Database client removed from pool log: This is harmless and may come from a test connection. Ignore unless accompanied by errors.
+
+Prisma v7 Upgrade: Not yet performed. When upgrading, be aware of breaking changes (env loading, driver adapters). Test in development first.
+
+📌 Additional Notes
+Always backup production database before manual interventions.
+
+Use prisma migrate status to check the current state.
+
+Keep migration files free of BOM (use UTF-8 without BOM encoding in your editor).
+

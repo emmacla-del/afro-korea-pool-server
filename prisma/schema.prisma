@@ -54,11 +54,16 @@ enum PurchaseOrderStatus {
   CANCELED
 }
 
-// 👇 NEW ENUM for verification status
 enum VerificationStatus {
   PENDING
   VERIFIED
   REJECTED
+}
+
+// 👇 NEW ENUM for team buying
+enum DealType {
+  MOQ_POOL
+  TEAM_DEAL
 }
 
 model User {
@@ -78,11 +83,10 @@ model Supplier {
   id           String   @id @default(uuid())
   ownerUserId  String   @unique
   displayName  String
-  // 👇 NEW FIELDS
-  country      String   // e.g., "Nigeria", "Cameroon" (required)
-  city         String?  // optional city
+  country      String
+  city         String?
   verificationStatus VerificationStatus @default(PENDING)
-  businessRegNumber String? // optional business registration number
+  businessRegNumber String?
 
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -92,7 +96,7 @@ model Supplier {
   purchaseOrders PurchaseOrder[]
   orders        Order[]
 
-  @@index([verificationStatus]) // index for faster queries
+  @@index([verificationStatus])
 }
 
 model Product {
@@ -141,18 +145,25 @@ model Image {
 model Pool {
   id                   String     @id @default(uuid())
   variantId            String
-  status               PoolStatus @default(OPEN)
-
+  dealType             DealType   @default(MOQ_POOL)
+  
+  // For MOQ pooling (existing)
   thresholdQtySnapshot Int
+  committedQty         Int        @default(0)
+  
+  // For team buying (NEW)
+  minBuyers            Int?
+  currentBuyers        Int?       @default(0)
+  teamPrice            Int?
+  
+  // Shared fields
   unitPriceXafSnapshot Int
-
+  status               PoolStatus @default(OPEN)
   deadlineAt           DateTime
   lockedAt             DateTime?
   paymentWindowEndsAt  DateTime?
-
-  committedQty         Int        @default(0)
+  
   paidQty              Int        @default(0)
-
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 

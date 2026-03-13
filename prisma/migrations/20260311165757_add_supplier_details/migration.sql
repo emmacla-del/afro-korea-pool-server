@@ -1,5 +1,10 @@
-﻿-- CreateEnum
-CREATE TYPE "VerificationStatus" AS ENUM ('PENDING', 'VERIFIED', 'REJECTED');
+-- CreateEnum if not exists
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'VerificationStatus') THEN
+        CREATE TYPE "VerificationStatus" AS ENUM ('PENDING', 'VERIFIED', 'REJECTED');
+    END IF;
+END$$;
 
 -- AlterTable
 ALTER TABLE "Supplier" ADD COLUMN     "businessRegNumber" TEXT,

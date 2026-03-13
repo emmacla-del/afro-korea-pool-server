@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "Image" (
     "id" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
