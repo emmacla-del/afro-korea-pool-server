@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
+import { ServeStaticModule } from '@nestjs/serve-static'; // 👈 ADDED
+import { join } from 'path'; // 👈 ADDED
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
@@ -11,8 +13,8 @@ import { SupplierModule } from './supplier/supplier.module';
 import { DevModule } from './dev/dev.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { AuthModule } from './auth/auth.module';
-import { AdminController } from './admin/admin.controller';   // <-- NEW
-import { AdminGuard } from './auth/admin.guard';             // <-- NEW
+import { AdminController } from './admin/admin.controller';
+import { AdminGuard } from './auth/admin.guard';
 
 @Module({
   imports: [
@@ -30,6 +32,11 @@ import { AdminGuard } from './auth/admin.guard';             // <-- NEW
         level: process.env.LOG_LEVEL || 'info',
       },
     }),
+    // 👇 NEW: Serve uploaded images
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'uploads'),
+      serveRoot: '/uploads',
+    }),
     PrismaModule,
     PoolsModule,
     OrdersModule,
@@ -40,10 +47,10 @@ import { AdminGuard } from './auth/admin.guard';             // <-- NEW
   ],
   controllers: [
     HealthController,
-    AdminController,   // <-- NEW
+    AdminController,
   ],
   providers: [
-    AdminGuard,        // <-- NEW
+    AdminGuard,
   ],
 })
 export class AppModule { }
