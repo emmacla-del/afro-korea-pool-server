@@ -1,12 +1,11 @@
 import { Module } from '@nestjs/common';
 import { CatalogController } from './catalog.controller';
 import { CatalogService } from './catalog.service';
-import { PrismaModule } from '../prisma/prisma.module'; // ADD THIS
+import { CloudinaryModule } from '../cloudinary/cloudinary.module'; // 👈 ADD
 
 @Module({
-  imports: [PrismaModule], // ADD THIS LINE
+  imports: [CloudinaryModule], // 👈 ADD
   controllers: [CatalogController],
   providers: [CatalogService],
-  exports: [CatalogService],
 })
 export class CatalogModule { }

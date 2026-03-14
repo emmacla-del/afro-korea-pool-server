@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { PrismaModule } from './prisma/prisma.module';
+import { CloudinaryModule } from './cloudinary/cloudinary.module'; // 👈 ADD THIS
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
 import { PoolsModule } from './pools/pools.module';
@@ -28,6 +29,7 @@ import { AdminGuard } from './auth/admin.guard';
       },
     }),
     PrismaModule,
+    CloudinaryModule, // 👈 ADDED
     PoolsModule,
     OrdersModule,
     SupplierModule,
