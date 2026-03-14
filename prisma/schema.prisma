@@ -60,7 +60,6 @@ enum VerificationStatus {
   REJECTED
 }
 
-// 👇 NEW ENUM for team buying
 enum DealType {
   MOQ_POOL
   TEAM_DEAL
@@ -144,30 +143,27 @@ model Image {
 
 model Pool {
   id                   String     @id @default(uuid())
-  variantId            String
+  variantId            String?               // 👈 made optional
   dealType             DealType   @default(MOQ_POOL)
-  
-  // For MOQ pooling (existing)
+
   thresholdQtySnapshot Int
   committedQty         Int        @default(0)
-  
-  // For team buying (NEW)
+
   minBuyers            Int?
   currentBuyers        Int?       @default(0)
   teamPrice            Int?
-  
-  // Shared fields
+
   unitPriceXafSnapshot Int
   status               PoolStatus @default(OPEN)
   deadlineAt           DateTime
   lockedAt             DateTime?
   paymentWindowEndsAt  DateTime?
-  
+
   paidQty              Int        @default(0)
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 
-  variant      ProductVariant @relation(fields: [variantId], references: [id])
+  variant      ProductVariant? @relation(fields: [variantId], references: [id])  // relation updated
   commitments  Commitment[]
   purchaseOrder PurchaseOrder?
   orders        Order[]
@@ -199,7 +195,7 @@ model Order {
   id            String      @id @default(uuid())
   userId        String
   supplierId    String
-  variantId     String
+  variantId     String?               // 👈 made optional
   qty           Int
 
   poolId        String?
@@ -218,7 +214,7 @@ model Order {
 
   user     User           @relation(fields: [userId], references: [id])
   supplier Supplier       @relation(fields: [supplierId], references: [id])
-  variant  ProductVariant @relation(fields: [variantId], references: [id])
+  variant  ProductVariant? @relation(fields: [variantId], references: [id])  // relation updated
 
   @@index([userId, createdAt])
   @@index([supplierId, createdAt])

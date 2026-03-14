@@ -1,0 +1,3 @@
+﻿-- AlterTable
+ALTER TABLE "Pool" ALTER COLUMN "variantId" DROP NOT NULL;
+ALTER TABLE "Order" ALTER COLUMN "variantId" DROP NOT NULL;
