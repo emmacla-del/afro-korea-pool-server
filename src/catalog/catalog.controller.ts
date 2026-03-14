@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,          // 👈 ADDED
   Get,
   Param,
   Patch,
@@ -154,6 +155,15 @@ export class CatalogController {
     return { id: created.id };
   }
   // ======================================================================================
+
+  // 👇 NEW: Delete a product (only if owned by the supplier)
+  @Delete('/supplier/products/:id')
+  @UseGuards(JwtAuthGuard)
+  async deleteProduct(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const userId = requireUserId(req);
+    await this.catalogService.deleteProduct(userId, id);
+    return { success: true };
+  }
 
   // Other endpoints remain unchanged
   @Post('/supplier/variants')

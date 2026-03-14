@@ -8,7 +8,7 @@ import { v2 as Cloudinary } from 'cloudinary'; // type only
 export class CatalogService {
     constructor(
         private prisma: PrismaService,
-        @Inject('CLOUDINARY') private cloudinary: typeof Cloudinary, // 👈 injected configured instance
+        @Inject('CLOUDINARY') private cloudinary: typeof Cloudinary,
     ) { }
 
     private async getSupplierIdForUser(userId: string): Promise<string> {
@@ -185,14 +185,17 @@ export class CatalogService {
 
         const poolByVariantId = new Map<string, any>();
         for (const p of pools) {
-            poolByVariantId.set(p.variantId, {
-                id: p.id,
-                status: p.status,
-                committedQty: p.committedQty,
-                thresholdQtySnapshot: p.thresholdQtySnapshot,
-                deadlineAt: p.deadlineAt,
-                paymentWindowEndsAt: p.paymentWindowEndsAt,
-            });
+            // 👇 FIX: only add to map if variantId is not null
+            if (p.variantId) {
+                poolByVariantId.set(p.variantId, {
+                    id: p.id,
+                    status: p.status,
+                    committedQty: p.committedQty,
+                    thresholdQtySnapshot: p.thresholdQtySnapshot,
+                    deadlineAt: p.deadlineAt,
+                    paymentWindowEndsAt: p.paymentWindowEndsAt,
+                });
+            }
         }
 
         return products.map((p) => {
@@ -277,14 +280,17 @@ export class CatalogService {
 
         const poolByVariantId = new Map<string, any>();
         for (const p of pools) {
-            poolByVariantId.set(p.variantId, {
-                id: p.id,
-                status: p.status,
-                committedQty: p.committedQty,
-                thresholdQtySnapshot: p.thresholdQtySnapshot,
-                deadlineAt: p.deadlineAt,
-                paymentWindowEndsAt: p.paymentWindowEndsAt,
-            });
+            // 👇 FIX: only add to map if variantId is not null
+            if (p.variantId) {
+                poolByVariantId.set(p.variantId, {
+                    id: p.id,
+                    status: p.status,
+                    committedQty: p.committedQty,
+                    thresholdQtySnapshot: p.thresholdQtySnapshot,
+                    deadlineAt: p.deadlineAt,
+                    paymentWindowEndsAt: p.paymentWindowEndsAt,
+                });
+            }
         }
 
         return products.map((p) => ({
@@ -476,6 +482,53 @@ export class CatalogService {
         const product = products.find((p) => p.id === productId);
         if (!product) throw new NotFoundException('Product not found');
         return product;
+    }
+
+    // ✅ NEW: Delete a product (only if owned by the supplier)
+    async deleteProduct(userId: string, productId: string) {
+        const supplierId = await this.getSupplierIdForUser(userId);
+        const product = await this.prisma.product.findUnique({
+            where: { id: productId },
+            select: { supplierId: true },
+        });
+        if (!product) throw new NotFoundException('Product not found');
+        if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
+
+        // Use transaction to handle variants and nullify references
+        await this.prisma.$transaction(async (tx) => {
+            // Find all variants of this product
+            const variants = await tx.productVariant.findMany({
+                where: { productId },
+                select: { id: true },
+            });
+            const variantIds = variants.map(v => v.id);
+
+            if (variantIds.length > 0) {
+                // Disconnect variants from pools (set variantId to null)
+                await tx.pool.updateMany({
+                    where: { variantId: { in: variantIds } },
+                    data: { variantId: null },
+                });
+
+                // Disconnect variants from orders (set variantId to null)
+                await tx.order.updateMany({
+                    where: { variantId: { in: variantIds } },
+                    data: { variantId: null },
+                });
+
+                // Delete the variants
+                await tx.productVariant.deleteMany({
+                    where: { productId },
+                });
+            }
+
+            // Images will be deleted automatically due to onDelete: Cascade
+            await tx.product.delete({
+                where: { id: productId },
+            });
+        });
+
+        return { success: true };
     }
 
     async importCatalog(

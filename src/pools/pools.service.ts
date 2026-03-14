@@ -80,6 +80,11 @@ export class PoolsService {
       });
       if (!pool) throw new NotFoundException('Pool not found');
 
+      // 👇 Ensure variant exists (pools always have a variant, but TypeScript needs a hint)
+      if (!pool.variant) {
+        throw new NotFoundException('Variant not found for this pool');
+      }
+
       if (pool.status !== PoolStatus.OPEN || pool.lockedAt) {
         throw new ConflictException('Pool is locked');
       }
@@ -156,7 +161,7 @@ export class PoolsService {
         await tx.order.createMany({
           data: activeCommitments.map((commitment) => ({
             userId: commitment.userId,
-            supplierId: pool.variant.product.supplierId,
+            supplierId: pool.variant!.product.supplierId,
             variantId: pool.variantId,
             qty: commitment.qty,
             poolId: pool.id,
@@ -314,6 +319,12 @@ export class PoolsService {
         include: { variant: { include: { product: true } }, purchaseOrder: true },
       });
       if (!pool) throw new NotFoundException('Pool not found');
+
+      // 👇 Ensure variant exists (pool must have a variant to be in payment window)
+      if (!pool.variant) {
+        throw new NotFoundException('Variant not found for this pool');
+      }
+
       if (pool.status !== PoolStatus.PAYMENT_WINDOW || !pool.paymentWindowEndsAt) return pool;
       if (pool.paymentWindowEndsAt.getTime() > now.getTime()) return pool;
 
@@ -337,6 +348,12 @@ export class PoolsService {
       }
 
       const supplierId = pool.variant.product.supplierId;
+
+      // 👇 Ensure variantId is not null before creating purchase order
+      if (!pool.variantId) {
+        throw new Error('Cannot create purchase order: variantId is null');
+      }
+
       const purchasedPool = await tx.pool.update({
         where: { id: pool.id },
         data: { status: PoolStatus.PURCHASED },

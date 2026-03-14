@@ -10,7 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async createDirectOrder(input: { userId: string; variantId: string; qty: number }) {
     if (input.qty <= 0) throw new BadRequestException('qty must be > 0');
@@ -43,7 +43,12 @@ export class OrdersService {
   async listOrdersForUser(userId: string) {
     return this.prisma.order.findMany({
       where: { userId },
-      include: { pool: true, payments: true, variant: { include: { product: true } }, purchaseOrder: true },
+      include: {
+        pool: true,
+        payments: true,
+        variant: { include: { product: true } },
+        purchaseOrder: true,
+      },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
@@ -52,7 +57,12 @@ export class OrdersService {
   async getOrderForUser(input: { userId: string; orderId: string }) {
     const order = await this.prisma.order.findFirst({
       where: { id: input.orderId, userId: input.userId },
-      include: { pool: true, payments: true, variant: { include: { product: true } }, purchaseOrder: true },
+      include: {
+        pool: true,
+        payments: true,
+        variant: { include: { product: true } },
+        purchaseOrder: true,
+      },
     });
     if (!order) throw new NotFoundException('Order not found');
     return order;
@@ -115,6 +125,11 @@ export class OrdersService {
             data: { status: PoolStatus.PURCHASED },
           });
 
+          // 👇 Ensure variantId is not null before creating purchase order
+          if (!updatedPool.variantId) {
+            throw new Error('Cannot create purchase order for pool: variantId is null');
+          }
+
           await tx.purchaseOrder.create({
             data: {
               supplierId: order.supplierId,
@@ -134,9 +149,14 @@ export class OrdersService {
           });
         }
       } else {
-        // Direct purchase: create supplier purchase order as soon as payment completes (MVP).
+        // Direct purchase
         const existingPo = await tx.purchaseOrder.findFirst({ where: { directOrderId: order.id } });
         if (!existingPo) {
+          // 👇 Ensure variantId is not null before creating purchase order
+          if (!order.variantId) {
+            throw new Error('Cannot create purchase order for direct order: variantId is null');
+          }
+
           await tx.purchaseOrder.create({
             data: {
               supplierId: order.supplierId,

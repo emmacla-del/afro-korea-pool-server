@@ -1,19 +1,15 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PoolStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { v2 as cloudinary } from 'cloudinary';
-
-// Configure Cloudinary from environment variables
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+import { v2 as Cloudinary } from 'cloudinary'; // type only
 
 @Injectable()
 export class CatalogService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    @Inject('CLOUDINARY') private cloudinary: typeof Cloudinary,
+  ) { }
 
   private async getSupplierIdForUser(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -34,17 +30,17 @@ export class CatalogService {
     mimetype: string,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
+      const uploadStream = this.cloudinary.uploader.upload_stream(
         {
           folder: 'products',
-          public_id: `${randomUUID()}-${filename.replace(/\.[^/.]+$/, '')}`, // strip extension
+          public_id: `${randomUUID()}-${filename.replace(/\.[^/.]+$/, '')}`,
           resource_type: 'image',
         },
         (error, result) => {
           if (error || !result) {
             reject(error ?? new Error('Cloudinary upload failed'));
           } else {
-            resolve(result.secure_url); // ✅ always HTTPS, CDN-backed
+            resolve(result.secure_url);
           }
         },
       );
@@ -75,7 +71,7 @@ export class CatalogService {
       throw new ForbiddenException('Your account must be verified to create products');
     }
 
-    // ✅ Upload all images to Cloudinary BEFORE the DB transaction
+    // Upload all images to Cloudinary BEFORE the DB transaction
     const uploadedUrls: string[] = [];
     for (const file of files) {
       const url = await this.uploadToCloudinary(file.buffer, file.filename, file.mimetype);
@@ -109,7 +105,7 @@ export class CatalogService {
           data: uploadedUrls.map((url, index) => ({
             id: randomUUID(),
             productId: product.id,
-            url, // ✅ full Cloudinary HTTPS URL stored in DB
+            url,
             order: index,
           })),
         });
@@ -118,7 +114,7 @@ export class CatalogService {
       return product;
     });
   }
-  // ======================================================================
+  // ============================================================================
 
   async listPublicProducts() {
     const products = await this.prisma.product.findMany({
@@ -189,14 +185,17 @@ export class CatalogService {
 
     const poolByVariantId = new Map<string, any>();
     for (const p of pools) {
-      poolByVariantId.set(p.variantId, {
-        id: p.id,
-        status: p.status,
-        committedQty: p.committedQty,
-        thresholdQtySnapshot: p.thresholdQtySnapshot,
-        deadlineAt: p.deadlineAt,
-        paymentWindowEndsAt: p.paymentWindowEndsAt,
-      });
+      // 👇 FIX: only add if variantId is not null
+      if (p.variantId) {
+        poolByVariantId.set(p.variantId, {
+          id: p.id,
+          status: p.status,
+          committedQty: p.committedQty,
+          thresholdQtySnapshot: p.thresholdQtySnapshot,
+          deadlineAt: p.deadlineAt,
+          paymentWindowEndsAt: p.paymentWindowEndsAt,
+        });
+      }
     }
 
     return products.map((p) => {
@@ -220,7 +219,7 @@ export class CatalogService {
           ...v,
           pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
         })),
-        images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url), // ✅ return plain URL strings
+        images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url),
       };
     });
   }
@@ -281,14 +280,17 @@ export class CatalogService {
 
     const poolByVariantId = new Map<string, any>();
     for (const p of pools) {
-      poolByVariantId.set(p.variantId, {
-        id: p.id,
-        status: p.status,
-        committedQty: p.committedQty,
-        thresholdQtySnapshot: p.thresholdQtySnapshot,
-        deadlineAt: p.deadlineAt,
-        paymentWindowEndsAt: p.paymentWindowEndsAt,
-      });
+      // 👇 FIX: only add if variantId is not null
+      if (p.variantId) {
+        poolByVariantId.set(p.variantId, {
+          id: p.id,
+          status: p.status,
+          committedQty: p.committedQty,
+          thresholdQtySnapshot: p.thresholdQtySnapshot,
+          deadlineAt: p.deadlineAt,
+          paymentWindowEndsAt: p.paymentWindowEndsAt,
+        });
+      }
     }
 
     return products.map((p) => ({
@@ -297,7 +299,7 @@ export class CatalogService {
         ...v,
         pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
       })),
-      images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url), // ✅ plain URL strings
+      images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url),
     }));
   }
 
@@ -480,6 +482,53 @@ export class CatalogService {
     const product = products.find((p) => p.id === productId);
     if (!product) throw new NotFoundException('Product not found');
     return product;
+  }
+
+  // ✅ NEW: Delete a product (only if owned by the supplier)
+  async deleteProduct(userId: string, productId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      select: { supplierId: true },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
+
+    // Use transaction to handle variants and nullify references
+    await this.prisma.$transaction(async (tx) => {
+      // Find all variants of this product
+      const variants = await tx.productVariant.findMany({
+        where: { productId },
+        select: { id: true },
+      });
+      const variantIds = variants.map(v => v.id);
+
+      if (variantIds.length > 0) {
+        // Disconnect variants from pools (set variantId to null)
+        await tx.pool.updateMany({
+          where: { variantId: { in: variantIds } },
+          data: { variantId: null },
+        });
+
+        // Disconnect variants from orders (set variantId to null)
+        await tx.order.updateMany({
+          where: { variantId: { in: variantIds } },
+          data: { variantId: null },
+        });
+
+        // Delete the variants
+        await tx.productVariant.deleteMany({
+          where: { productId },
+        });
+      }
+
+      // Images will be deleted automatically due to onDelete: Cascade
+      await tx.product.delete({
+        where: { id: productId },
+      });
+    });
+
+    return { success: true };
   }
 
   async importCatalog(
