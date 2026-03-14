@@ -3,8 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
-import { ServeStaticModule } from '@nestjs/serve-static'; // 👈 ADDED
-import { join } from 'path'; // 👈 ADDED
+import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
@@ -32,11 +31,7 @@ import { AdminGuard } from './auth/admin.guard';
         level: process.env.LOG_LEVEL || 'info',
       },
     }),
-    // 👇 NEW: Serve uploaded images
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'uploads'),
-      serveRoot: '/uploads',
-    }),
+    // ✅ ServeStaticModule REMOVED — static files handled by @fastify/static in main.ts
     PrismaModule,
     PoolsModule,
     OrdersModule,
