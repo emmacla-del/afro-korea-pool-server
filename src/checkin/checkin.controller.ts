@@ -15,7 +15,9 @@ export class CheckinController {
         try {
             return await this.checkinService.checkIn(userId);
         } catch (error) {
-            throw new BadRequestException(error.message);
+            // ✅ Fix: cast error to Error type before accessing .message
+            const message = error instanceof Error ? error.message : 'Check-in failed';
+            throw new BadRequestException(message);
         }
     }
 
