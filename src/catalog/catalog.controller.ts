@@ -2,7 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
-  Delete,          // 👈 ADDED
+  Delete,
   Get,
   Param,
   Patch,
@@ -16,11 +16,10 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
-// Schema for multipart fields (all strings from form-data)
+// ✅ SKU removed — auto-generated on backend
 const createProductMultipartSchema = z.object({
   product_name: z.string().min(1, 'Product name is required'),
   description: z.string().optional(),
-  sku: z.string().min(1, 'SKU is required'),
   price: z
     .string()
     .transform((v) => parseFloat(v))
@@ -32,10 +31,9 @@ const createProductMultipartSchema = z.object({
   currency: z.string().max(10).default('XAF').optional(),
 });
 
-// Existing schemas (unchanged)
 const createVariantSchema = z.object({
   productId: z.string().uuid(),
-  sku: z.string().min(1).max(80),
+  sku: z.string().min(1).max(80).optional(), // ✅ optional — auto-generated if not provided
   unitPriceXaf: z.number().int().min(0).max(2_000_000_000),
   thresholdQty: z.number().int().min(1).max(100000),
   leadTimeDays: z.number().int().min(1).max(365).optional(),
@@ -49,7 +47,7 @@ const importSchema = z.object({
       category: z.string().max(100).optional(),
       variants: z.array(
         z.object({
-          sku: z.string().min(1).max(80),
+          sku: z.string().min(1).max(80).optional(), // ✅ optional — auto-generated if not provided
           unitPriceXaf: z.number().int().min(0).max(2_000_000_000),
           thresholdQty: z.number().int().min(1).max(100000),
           leadTimeDays: z.number().int().min(1).max(365).optional(),
@@ -102,12 +100,12 @@ export class CatalogController {
     return this.catalogService.getLatestCatalogImport(userId);
   }
 
-  // ==================== NEW: Multipart product creation with images ====================
+  // ✅ Multipart product creation — SKU auto-generated, not required from client
   @Post('/supplier/products')
   @UseGuards(JwtAuthGuard)
   async createProduct(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
-    const parts = (req as any).parts(); // type assertion – works at runtime
+    const parts = (req as any).parts();
     const fields: Record<string, any> = {};
     const files: Array<{ buffer: Buffer; filename: string; mimetype: string }> = [];
 
@@ -137,14 +135,14 @@ export class CatalogController {
       });
     }
 
-    const { product_name, description, sku, price, stock, currency } = parseResult.data;
+    // ✅ sku removed from destructuring — backend generates it
+    const { product_name, description, price, stock, currency } = parseResult.data;
 
     const created = await this.catalogService.createProductWithImages(
       userId,
       {
         product_name,
         description,
-        sku,
         price,
         stock,
         currency: currency || 'XAF',
@@ -154,9 +152,8 @@ export class CatalogController {
 
     return { id: created.id };
   }
-  // ======================================================================================
 
-  // 👇 NEW: Delete a product (only if owned by the supplier)
+  // ✅ Delete a product (only if owned by the supplier)
   @Delete('/supplier/products/:id')
   @UseGuards(JwtAuthGuard)
   async deleteProduct(@Req() req: FastifyRequest, @Param('id') id: string) {
@@ -165,7 +162,6 @@ export class CatalogController {
     return { success: true };
   }
 
-  // Other endpoints remain unchanged
   @Post('/supplier/variants')
   @UseGuards(JwtAuthGuard)
   async createVariant(@Req() req: FastifyRequest, @Body() body: unknown) {

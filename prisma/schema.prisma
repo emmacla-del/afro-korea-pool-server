@@ -280,3 +280,12 @@ model FulfillmentEvent {
 
   @@index([purchaseOrderId])
 }
+model UserCheckIn {
+  id        String   @id @default(uuid())
+  userId    String
+  checkInDate DateTime @default(now())
+  reward    Int?      // e.g., coupon value
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, checkInDate]) // one check-in per day
+}

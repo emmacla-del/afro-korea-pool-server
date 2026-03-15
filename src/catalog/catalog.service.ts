@@ -1,15 +1,19 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PoolStatus } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { v2 as Cloudinary } from 'cloudinary'; // type only
+import { v2 as cloudinary } from 'cloudinary';
+
+// Configure Cloudinary from environment variables
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 @Injectable()
 export class CatalogService {
-  constructor(
-    private prisma: PrismaService,
-    @Inject('CLOUDINARY') private cloudinary: typeof Cloudinary,
-  ) { }
+  constructor(private prisma: PrismaService) { }
 
   private async getSupplierIdForUser(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -23,6 +27,14 @@ export class CatalogService {
     return user.supplier.id;
   }
 
+  // ✅ Auto-generate a unique SKU — supplier never needs to provide one
+  private generateSku(): string {
+    const prefix = 'SKU';
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const randomPart = Math.random().toString(36).substring(2, 10).toUpperCase();
+    return `${prefix}-${timestamp}-${randomPart}`;
+  }
+
   // ✅ Upload a single file buffer to Cloudinary and return the secure URL
   private async uploadToCloudinary(
     buffer: Buffer,
@@ -30,7 +42,7 @@ export class CatalogService {
     mimetype: string,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
-      const uploadStream = this.cloudinary.uploader.upload_stream(
+      const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: 'products',
           public_id: `${randomUUID()}-${filename.replace(/\.[^/.]+$/, '')}`,
@@ -54,7 +66,6 @@ export class CatalogService {
     data: {
       product_name: string;
       description?: string;
-      sku: string;
       price: number;
       stock: number;
       currency: string;
@@ -71,7 +82,7 @@ export class CatalogService {
       throw new ForbiddenException('Your account must be verified to create products');
     }
 
-    // Upload all images to Cloudinary BEFORE the DB transaction
+    // ✅ Upload all images to Cloudinary BEFORE the DB transaction
     const uploadedUrls: string[] = [];
     for (const file of files) {
       const url = await this.uploadToCloudinary(file.buffer, file.filename, file.mimetype);
@@ -88,11 +99,14 @@ export class CatalogService {
         },
       });
 
+      // ✅ SKU is auto-generated — supplier never provides one
+      const sku = this.generateSku();
+
       await tx.productVariant.create({
         data: {
           id: randomUUID(),
           productId: product.id,
-          sku: data.sku,
+          sku,
           unitPriceXaf: Math.round(data.price),
           thresholdQty: data.stock,
           leadTimeDays: 14,
@@ -114,7 +128,7 @@ export class CatalogService {
       return product;
     });
   }
-  // ============================================================================
+  // ======================================================================
 
   async listPublicProducts() {
     const products = await this.prisma.product.findMany({
@@ -185,7 +199,6 @@ export class CatalogService {
 
     const poolByVariantId = new Map<string, any>();
     for (const p of pools) {
-      // 👇 FIX: only add if variantId is not null
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
@@ -280,7 +293,6 @@ export class CatalogService {
 
     const poolByVariantId = new Map<string, any>();
     for (const p of pools) {
-      // 👇 FIX: only add if variantId is not null
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
@@ -352,7 +364,7 @@ export class CatalogService {
     userId: string,
     input: {
       productId: string;
-      sku: string;
+      sku?: string; // ✅ optional — auto-generated if not provided
       unitPriceXaf: number;
       thresholdQty: number;
       leadTimeDays?: number;
@@ -365,12 +377,14 @@ export class CatalogService {
     if (!product) throw new NotFoundException('Product not found');
     if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
 
+    const sku = input.sku ?? this.generateSku();
+
     try {
       return await this.prisma.productVariant.create({
         data: {
           id: randomUUID(),
           productId: input.productId,
-          sku: input.sku,
+          sku,
           unitPriceXaf: input.unitPriceXaf,
           thresholdQty: input.thresholdQty,
           leadTimeDays: input.leadTimeDays ?? 14,
@@ -379,7 +393,7 @@ export class CatalogService {
       });
     } catch (err: any) {
       if (err?.code === 'P2002') {
-        throw new BadRequestException('SKU must be globally unique');
+        throw new BadRequestException('SKU collision occurred; please try again');
       }
       throw err;
     }
@@ -484,7 +498,6 @@ export class CatalogService {
     return product;
   }
 
-  // ✅ NEW: Delete a product (only if owned by the supplier)
   async deleteProduct(userId: string, productId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
     const product = await this.prisma.product.findUnique({
@@ -494,38 +507,29 @@ export class CatalogService {
     if (!product) throw new NotFoundException('Product not found');
     if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
 
-    // Use transaction to handle variants and nullify references
     await this.prisma.$transaction(async (tx) => {
-      // Find all variants of this product
       const variants = await tx.productVariant.findMany({
         where: { productId },
         select: { id: true },
       });
-      const variantIds = variants.map(v => v.id);
+      const variantIds = variants.map((v) => v.id);
 
       if (variantIds.length > 0) {
-        // Disconnect variants from pools (set variantId to null)
+        // Nullify foreign keys before deleting variants
         await tx.pool.updateMany({
           where: { variantId: { in: variantIds } },
           data: { variantId: null },
         });
-
-        // Disconnect variants from orders (set variantId to null)
         await tx.order.updateMany({
           where: { variantId: { in: variantIds } },
           data: { variantId: null },
         });
-
-        // Delete the variants
-        await tx.productVariant.deleteMany({
-          where: { productId },
-        });
+        await tx.productVariant.deleteMany({ where: { productId } });
       }
 
-      // Images will be deleted automatically due to onDelete: Cascade
-      await tx.product.delete({
-        where: { id: productId },
-      });
+      // Delete images then the product
+      await tx.image.deleteMany({ where: { productId } });
+      await tx.product.delete({ where: { id: productId } });
     });
 
     return { success: true };
@@ -539,7 +543,7 @@ export class CatalogService {
         description?: string;
         category?: string;
         variants: Array<{
-          sku: string;
+          sku?: string; // ✅ optional — auto-generated if not provided
           unitPriceXaf: number;
           thresholdQty: number;
           leadTimeDays?: number;
@@ -575,7 +579,7 @@ export class CatalogService {
             data: productInput.variants.map((v) => ({
               id: randomUUID(),
               productId: product.id,
-              sku: v.sku,
+              sku: v.sku ?? this.generateSku(), // ✅ auto-generate if not provided
               unitPriceXaf: v.unitPriceXaf,
               thresholdQty: v.thresholdQty,
               leadTimeDays: v.leadTimeDays ?? 14,
@@ -586,12 +590,17 @@ export class CatalogService {
           return { id: productId };
         });
 
-        results.push({ productId: created.id, createdVariants: productInput.variants.length });
+        results.push({
+          productId: created.id,
+          createdVariants: productInput.variants.length,
+        });
       } catch (err: any) {
-        const message = typeof err?.message === 'string' ? err.message : 'Unknown error';
+        const message =
+          typeof err?.message === 'string' ? err.message : 'Unknown error';
         if (
           err?.code === 'P2002' ||
-          (message.toLowerCase().includes('unique') && message.toLowerCase().includes('sku'))
+          (message.toLowerCase().includes('unique') &&
+            message.toLowerCase().includes('sku'))
         ) {
           errors.push({
             productTitle: productInput.product_name,
