@@ -19,6 +19,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get purchaseOrder() { return this.client.purchaseOrder; }
   get purchaseOrderItem() { return this.client.purchaseOrderItem; }
   get fulfillmentEvent() { return this.client.fulfillmentEvent; }
+  get userCheckIn() { return this.client.userCheckIn; } // ✅ ADDED
 
   // Expose raw query methods
   get $queryRaw() { return this.client.$queryRaw.bind(this.client); }
