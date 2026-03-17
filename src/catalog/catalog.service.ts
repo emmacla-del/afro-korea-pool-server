@@ -202,6 +202,10 @@ export class CatalogService {
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
+          dealType: p.dealType,               // 👈 ADDED
+          teamPrice: p.teamPrice,              // 👈 ADDED
+          minBuyers: p.minBuyers,              // 👈 ADDED
+          currentBuyers: p.currentBuyers,      // 👈 ADDED
           status: p.status,
           committedQty: p.committedQty,
           thresholdQtySnapshot: p.thresholdQtySnapshot,
@@ -296,6 +300,10 @@ export class CatalogService {
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
+          dealType: p.dealType,               // 👈 ADDED
+          teamPrice: p.teamPrice,              // 👈 ADDED
+          minBuyers: p.minBuyers,              // 👈 ADDED
+          currentBuyers: p.currentBuyers,      // 👈 ADDED
           status: p.status,
           committedQty: p.committedQty,
           thresholdQtySnapshot: p.thresholdQtySnapshot,
