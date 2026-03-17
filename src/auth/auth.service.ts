@@ -3,12 +3,14 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { UserRole } from '@prisma/client';
+import { ReferralService } from '../referral/referral.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
+    private referralService: ReferralService,
   ) { }
 
   async register(
@@ -17,20 +19,26 @@ export class AuthService {
     role: UserRole,
     supplierData?: {
       displayName: string;
-      country: string;          // required for suppliers
+      country: string;
       city?: string;
       businessRegNumber?: string;
     },
+    name?: string,
+    referralCode?: string,
   ) {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     let user;
     try {
       user = await this.prisma.user.create({
-        data: { phone, password: hashedPassword, role },
+        data: {
+          phone,
+          password: hashedPassword,
+          role,
+          name: name || null,
+        },
       });
     } catch (error) {
-      // Cast error to any to access Prisma error properties
       const prismaError = error as any;
       if (prismaError.code === 'P2002') {
         throw new ConflictException('Phone already registered');
@@ -49,9 +57,22 @@ export class AuthService {
           country: supplierData.country,
           city: supplierData.city,
           businessRegNumber: supplierData.businessRegNumber,
-          // verificationStatus defaults to 'PENDING'
         },
       });
+    }
+
+    // Apply referral if code provided
+    if (referralCode) {
+      try {
+        await this.referralService.applyReferral(user.id, referralCode);
+      } catch (error) {
+        // Log error but do not fail registration – properly handle unknown type
+        if (error instanceof Error) {
+          console.error('Failed to apply referral:', error.message);
+        } else {
+          console.error('Failed to apply referral:', String(error));
+        }
+      }
     }
 
     return this.login(user);
@@ -68,6 +89,7 @@ export class AuthService {
         id: user.id,
         phone: user.phone,
         role: user.role,
+        name: user.name,
       },
     };
   }

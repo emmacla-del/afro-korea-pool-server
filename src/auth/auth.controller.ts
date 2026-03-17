@@ -7,6 +7,8 @@ const registerSchema = z.object({
   phone: z.string().trim().min(3).max(50),
   password: z.string().min(6).max(200),
   role: z.enum(['CUSTOMER', 'SUPPLIER']).default('CUSTOMER'),
+  name: z.string().optional(),               // 👈 NEW
+  referralCode: z.string().optional(),       // 👈 NEW
 });
 
 const loginSchema = z.object({
@@ -16,7 +18,7 @@ const loginSchema = z.object({
 
 @Controller('/auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(private readonly authService: AuthService) { }
 
   @Post('/register')
   async register(@Body() body: unknown) {
@@ -24,7 +26,15 @@ export class AuthController {
     const role =
       parsed.role === 'SUPPLIER' ? UserRole.SUPPLIER : UserRole.CUSTOMER;
 
-    return this.authService.register(parsed.phone, parsed.password, role);
+    // Note: supplierData is not sent via this schema – you may need to extend it later
+    return this.authService.register(
+      parsed.phone,
+      parsed.password,
+      role,
+      undefined, // supplierData (if needed)
+      parsed.name,
+      parsed.referralCode,
+    );
   }
 
   @Post('/login')
