@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PrismaModule } from '../prisma/prisma.module';
-import { ReferralModule } from '../referral/referral.module'; // 👈 NEW
+import { ReferralModule } from '../referral/referral.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { JwtStrategy } from './jwt.strategy';   // 👈 import
 
 @Module({
   imports: [
@@ -12,10 +13,10 @@ import { AuthService } from './auth.service';
       secret: process.env.JWT_SECRET,
       signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '7d' },
     }),
-    ReferralModule, // 👈 ADD
+    ReferralModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService],
+  providers: [AuthService, JwtStrategy],        // 👈 add JwtStrategy
   exports: [AuthService],
 })
 export class AuthModule { }
