@@ -1,4 +1,4 @@
--- CreateEnum if not exists
+--CreateEnum
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'VerificationStatus') THEN

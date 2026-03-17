@@ -1,4 +1,4 @@
-﻿-- CreateEnum
+﻿--CreateEnum
 CREATE TYPE "DealType" AS ENUM ('MOQ_POOL', 'TEAM_DEAL');
 
 -- AlterTable
