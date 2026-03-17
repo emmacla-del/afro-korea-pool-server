@@ -6,7 +6,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
   private readonly client: PrismaClient;
 
-  // Expose all model accessors
+  // 👇 Existing getters (optional, but keep for compatibility)
   get user() { return this.client.user; }
   get supplier() { return this.client.supplier; }
   get product() { return this.client.product; }
@@ -19,8 +19,13 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get purchaseOrder() { return this.client.purchaseOrder; }
   get purchaseOrderItem() { return this.client.purchaseOrderItem; }
   get fulfillmentEvent() { return this.client.fulfillmentEvent; }
-  get userCheckIn() { return this.client.userCheckIn; } // ✅ ADDED
+  get userCheckIn() { return this.client.userCheckIn; }
 
+  // 👇 NEW: public properties for referral models (fully typed)
+  // 👇 NEW: public properties for referral models (fully typed)
+  public readonly reward: PrismaClient['reward'];
+  public readonly rewardTransaction: PrismaClient['rewardTransaction'];
+  public readonly referralTransaction: PrismaClient['referralTransaction'];
   // Expose raw query methods
   get $queryRaw() { return this.client.$queryRaw.bind(this.client); }
   get $executeRaw() { return this.client.$executeRaw.bind(this.client); }
@@ -30,6 +35,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
   constructor() {
     this.client = new PrismaClient();
+
+    // Assigning the delegates so they are available when the service is injected
+    this.reward = this.client.reward;
+    this.rewardTransaction = this.client.rewardTransaction;
+    this.referralTransaction = this.client.referralTransaction;
   }
 
   async onModuleInit() {

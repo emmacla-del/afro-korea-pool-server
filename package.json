@@ -32,7 +32,7 @@
     "@nestjs/schedule": "4.1.1",
     "@nestjs/serve-static": "^4.0.2",
     "@nestjs/throttler": "^6.5.0",
-    "@prisma/client": "^6.0.0",
+    "@prisma/client": "^6.19.2",
     "@sentry/node": "^10.43.0",
     "@sentry/profiling-node": "^10.43.0",
     "bcrypt": "^5.1.1",
