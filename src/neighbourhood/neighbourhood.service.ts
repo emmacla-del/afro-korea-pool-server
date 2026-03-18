@@ -22,9 +22,14 @@ export class NeighbourhoodService {
         });
     }
 
-    async create(name: string) {
+    async create(name: string, divisionId: string) {
         return this.prisma.neighbourhood.create({
-            data: { name },
+            data: {
+                name,
+                division: {
+                    connect: { id: divisionId }
+                }
+            },
         });
     }
 
