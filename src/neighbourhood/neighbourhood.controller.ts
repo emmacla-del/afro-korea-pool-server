@@ -1,7 +1,7 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete, UseGuards, BadRequestException } from '@nestjs/common';
 import { NeighbourhoodService } from './neighbourhood.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { AdminGuard } from '../auth/admin.guard'; // you'll need to create this guard if not exists
+import { AdminGuard } from '../auth/admin.guard';
 
 @Controller('neighbourhoods')
 export class NeighbourhoodController {
@@ -13,9 +13,12 @@ export class NeighbourhoodController {
     }
 
     @Post()
-    @UseGuards(JwtAuthGuard, AdminGuard) // protect admin routes
-    async create(@Body('name') name: string) {
-        return this.neighbourhoodService.create(name);
+    @UseGuards(JwtAuthGuard, AdminGuard)
+    async create(@Body('name') name: string, @Body('divisionId') divisionId: string) {
+        if (!divisionId) {
+            throw new BadRequestException('divisionId is required');
+        }
+        return this.neighbourhoodService.create(name, divisionId);
     }
 
     @Patch(':id')
