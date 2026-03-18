@@ -26,47 +26,55 @@ export class AuthService {
     name?: string,
     referralCode?: string,
   ) {
+    // Validate supplier data upfront
+    if (role === UserRole.SUPPLIER && !supplierData) {
+      throw new BadRequestException('Supplier data required');
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    let user;
-    try {
-      user = await this.prisma.user.create({
-        data: {
-          phone,
-          password: hashedPassword,
-          role,
-          name: name || null,
-        },
-      });
-    } catch (error) {
-      const prismaError = error as any;
-      if (prismaError.code === 'P2002') {
-        throw new ConflictException('Phone already registered');
+    // Use a transaction to ensure atomicity
+    const user = await this.prisma.$transaction(async (prisma) => {
+      // Create user
+      let user;
+      try {
+        user = await prisma.user.create({
+          data: {
+            phone,
+            password: hashedPassword,
+            role,
+            name: name || null,
+          },
+        });
+      } catch (error: any) {
+        if (error.code === 'P2002') {
+          throw new ConflictException('Phone already registered');
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    if (role === 'SUPPLIER') {
-      if (!supplierData) {
-        throw new BadRequestException('Supplier data required');
+      // If supplier, create supplier record
+      if (role === UserRole.SUPPLIER && supplierData) {
+        await prisma.supplier.create({
+          data: {
+            ownerUserId: user.id,
+            displayName: supplierData.displayName,
+            country: supplierData.country,
+            city: supplierData.city,
+            businessRegNumber: supplierData.businessRegNumber,
+          },
+        });
       }
-      await this.prisma.supplier.create({
-        data: {
-          ownerUserId: user.id,
-          displayName: supplierData.displayName,
-          country: supplierData.country,
-          city: supplierData.city,
-          businessRegNumber: supplierData.businessRegNumber,
-        },
-      });
-    }
 
-    // Apply referral if code provided
+      return user;
+    });
+
+    // Apply referral after transaction (optional)
     if (referralCode) {
       try {
         await this.referralService.applyReferral(user.id, referralCode);
       } catch (error) {
-        // Log error but do not fail registration – properly handle unknown type
+        // Log error but do not fail registration
         if (error instanceof Error) {
           console.error('Failed to apply referral:', error.message);
         } else {
