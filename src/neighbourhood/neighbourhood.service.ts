@@ -7,7 +7,18 @@ export class NeighbourhoodService {
 
     async findAll() {
         return this.prisma.neighbourhood.findMany({
-            orderBy: { name: 'asc' },
+            include: {
+                division: {
+                    include: {
+                        region: true
+                    }
+                }
+            },
+            orderBy: [
+                { division: { region: { name: 'asc' } } },
+                { division: { name: 'asc' } },
+                { name: 'asc' }
+            ]
         });
     }
 

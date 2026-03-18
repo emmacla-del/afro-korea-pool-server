@@ -7,6 +7,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==================== ENUMS ====================
 enum UserRole {
   CUSTOMER
   SUPPLIER
@@ -65,6 +66,12 @@ enum DealType {
   TEAM_DEAL
 }
 
+enum DeliveryType {
+  HUB_PICKUP
+  SATELLITE_HOME
+  SATELLITE_HUB
+}
+
 enum ProductCategory {
   FOOD_PRODUCE
   TRANSFORMED_FOOD
@@ -73,16 +80,44 @@ enum ProductCategory {
   ELECTRONICS
 }
 
-// 👇 NEW: Neighbourhood model
-model Neighbourhood {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  users     User[]   // users belonging to this neighbourhood
-  pools     Pool[]   // deals restricted to this neighbourhood
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ==================== GEOGRAPHIC HIERARCHY ====================
+model Region {
+  id        String     @id @default(uuid())
+  name      String     @unique
+  divisions Division[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 }
 
+model Division {
+  id             String          @id @default(uuid())
+  name           String
+  regionId       String
+  region         Region          @relation(fields: [regionId], references: [id])
+  neighbourhoods Neighbourhood[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([name, regionId])
+}
+
+model Neighbourhood {
+  id         String   @id @default(uuid())
+  name       String
+  divisionId String
+  division   Division @relation(fields: [divisionId], references: [id])
+  
+  // REQUIRED OPPOSITE RELATIONS (FIXES P1012 ERROR)
+  users      User[]
+  pools      Pool[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([name, divisionId])
+}
+
+// ==================== USER & ROLES ====================
 model User {
   id        String   @id @default(uuid())
   name      String?
@@ -92,7 +127,6 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // 👇 NEW: neighbourhood relation
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
 
@@ -102,31 +136,31 @@ model User {
   checkIns    UserCheckIn[]
 
   referrerId   String?
-  referrer     User?        @relation("UserReferrals", fields: [referrerId], references: [id])
-  referrals    User[]       @relation("UserReferrals")
-  referralCode String?      @unique
-  rewardBalance Int         @default(0)
+  referrer     User?   @relation("UserReferrals", fields: [referrerId], references: [id])
+  referrals    User[]  @relation("UserReferrals")
+  referralCode String? @unique
+  rewardBalance Int     @default(0)
 
   superCreatorId String?
-  superCreator   User?       @relation("TeamCreatorSuper", fields: [superCreatorId], references: [id])
-  teamCreators   User[]      @relation("TeamCreatorSuper")
+  superCreator   User?   @relation("TeamCreatorSuper", fields: [superCreatorId], references: [id])
+  teamCreators   User[]  @relation("TeamCreatorSuper")
 
   rewardTransactions RewardTransaction[] @relation("UserRewardTransactions")
   referredCommitments Commitment[]        @relation("CommitmentReferrer")
-  createdPools       Pool[]               @relation("PoolCreator")
+  createdPools        Pool[]               @relation("PoolCreator")
 
   referrerTransactions ReferralTransaction[] @relation("ReferrerLinks")
   refereeTransactions ReferralTransaction[] @relation("RefereeLinks")
 }
 
 model Supplier {
-  id                 String             @id @default(uuid())
-  ownerUserId        String             @unique
-  displayName        String
-  country            String
-  city               String?
-  verificationStatus VerificationStatus @default(PENDING)
-  businessRegNumber  String?
+  id                  String             @id @default(uuid())
+  ownerUserId         String             @unique
+  displayName         String
+  country             String
+  city                String?
+  verificationStatus  VerificationStatus @default(PENDING)
+  businessRegNumber   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,6 +173,7 @@ model Supplier {
   @@index([verificationStatus])
 }
 
+// ==================== PRODUCT & INVENTORY ====================
 model Product {
   id          String   @id @default(uuid())
   supplierId  String
@@ -183,31 +218,36 @@ model Image {
   @@index([productId])
 }
 
+// ==================== AGGREGATION & POOLS ====================
 model Pool {
-  id                   String     @id @default(uuid())
-  variantId            String?
-  dealType             DealType   @default(MOQ_POOL)
-  thresholdQtySnapshot Int
-  committedQty         Int        @default(0)
-  minBuyers            Int?
-  currentBuyers        Int?       @default(0)
-  teamPrice            Int?
-  unitPriceXafSnapshot Int
-  status               PoolStatus @default(OPEN)
-  deadlineAt           DateTime
-  lockedAt             DateTime?
-  paymentWindowEndsAt  DateTime?
-  paidQty              Int        @default(0)
-  createdAt            DateTime   @default(now())
-  updatedAt            DateTime   @updatedAt
+  id                    String     @id @default(uuid())
+  variantId             String?
+  dealType              DealType   @default(MOQ_POOL)
+  thresholdQtySnapshot  Int
+  committedQty          Int        @default(0)
+  minBuyers             Int?
+  currentBuyers         Int?       @default(0)
+  teamPrice             Int?
+  unitPriceXafSnapshot  Int
+  status                PoolStatus @default(OPEN)
+  deadlineAt            DateTime
+  lockedAt              DateTime?
+  paymentWindowEndsAt   DateTime?
+  paidQty               Int        @default(0)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
 
   creatorId      String?
   creator        User?            @relation("PoolCreator", fields: [creatorId], references: [id])
   rewardQuantity Int?
 
-  // 👇 NEW: neighbourhood relation
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
+  
+  // HUB DETAILS
+  hubAddress      String?
+  hubContactPhone String?
+  hubName         String?
 
   variant        ProductVariant?  @relation("VariantPools", fields: [variantId], references: [id])
   commitments    Commitment[]     @relation("PoolCommitments")
@@ -240,31 +280,35 @@ model Commitment {
   @@index([userId])
 }
 
+// ==================== TRANSACTIONS & FULFILLMENT ====================
 model Order {
-  id           String      @id @default(uuid())
-  userId       String
-  supplierId   String
-  variantId    String?
-  qty          Int
-  poolId       String?
-  commitmentId String?     @unique
-  unitPriceXaf Int
-  amountXaf    Int
-  status       OrderStatus @default(PENDING_PAYMENT)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id             String      @id @default(uuid())
+  userId         String
+  supplierId     String
+  variantId      String?
+  qty            Int
+  poolId         String?
+  commitmentId   String?     @unique
+  unitPriceXaf   Int
+  amountXaf      Int
+  status         OrderStatus @default(PENDING_PAYMENT)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
+  // LOGISTICS UPGRADES
+  deliveryType    DeliveryType @default(HUB_PICKUP)
+  satelliteFeeXaf Int          @default(0)
   deliveryMethod  String?
   pickupPoint     String?
   deliveryAddress String?
 
-  pool       Pool?           @relation("PoolOrders", fields: [poolId], references: [id])
-  commitment Commitment?     @relation(fields: [commitmentId], references: [id])
-  payments   Payment[]       @relation("OrderPayments")
+  pool        Pool?           @relation("PoolOrders", fields: [poolId], references: [id])
+  commitment  Commitment?     @relation(fields: [commitmentId], references: [id])
+  payments    Payment[]       @relation("OrderPayments")
   purchaseOrder PurchaseOrder? @relation("DirectOrder")
-  user       User            @relation("UserOrders", fields: [userId], references: [id])
-  supplier   Supplier        @relation("SupplierOrders", fields: [supplierId], references: [id])
-  variant    ProductVariant? @relation("VariantOrders", fields: [variantId], references: [id])
+  user        User            @relation("UserOrders", fields: [userId], references: [id])
+  supplier    Supplier        @relation("SupplierOrders", fields: [supplierId], references: [id])
+  variant     ProductVariant? @relation("VariantOrders", fields: [variantId], references: [id])
 
   @@index([userId, createdAt])
   @@index([supplierId, createdAt])
@@ -288,20 +332,22 @@ model Payment {
 }
 
 model PurchaseOrder {
-  id            String              @id @default(uuid())
-  supplierId    String
-  source        PurchaseOrderSource @default(POOL)
-  poolId        String?             @unique
-  directOrderId String?             @unique
-  status        PurchaseOrderStatus @default(PENDING_SUPPLIER_CONFIRM)
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
+  id              String              @id @default(uuid())
+  supplierId      String
+  source          PurchaseOrderSource @default(POOL)
+  poolId          String?             @unique
+  directOrderId   String?             @unique
+  status          PurchaseOrderStatus @default(PENDING_SUPPLIER_CONFIRM)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  
+  totalLogisticsSavingsXaf Int        @default(0)
 
-  supplier    Supplier           @relation(fields: [supplierId], references: [id])
-  pool        Pool?              @relation(fields: [poolId], references: [id])
-  directOrder Order?             @relation("DirectOrder", fields: [directOrderId], references: [id])
-  items       PurchaseOrderItem[]
-  events      FulfillmentEvent[]
+  supplier      Supplier            @relation(fields: [supplierId], references: [id])
+  pool          Pool?               @relation(fields: [poolId], references: [id])
+  directOrder   Order?              @relation("DirectOrder", fields: [directOrderId], references: [id])
+  items         PurchaseOrderItem[]
+  events        FulfillmentEvent[]
 }
 
 model PurchaseOrderItem {
@@ -329,6 +375,7 @@ model FulfillmentEvent {
   @@index([purchaseOrderId])
 }
 
+// ==================== REWARDS & ENGAGEMENT ====================
 model UserCheckIn {
   id          String   @id @default(uuid())
   userId      String
