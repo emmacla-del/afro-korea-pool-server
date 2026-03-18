@@ -130,6 +130,73 @@ export class CatalogService {
   }
   // ======================================================================
 
+  // 👇 NEW: Get a single product by ID
+  async findOne(productId: string) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId, isActive: true },
+      include: {
+        supplier: {
+          select: {
+            id: true,
+            displayName: true,
+            country: true,
+            verificationStatus: true,
+          },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException('Product not found');
+
+    const variants = await this.prisma.productVariant.findMany({
+      where: { productId, isActive: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const images = await this.prisma.image.findMany({
+      where: { productId },
+      orderBy: { order: 'asc' },
+    });
+
+    const variantIds = variants.map(v => v.id);
+    const pools = variantIds.length === 0 ? [] : await this.prisma.pool.findMany({
+      where: {
+        variantId: { in: variantIds },
+        status: {
+          in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
+        },
+      },
+      distinct: ['variantId'],
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const poolByVariantId = new Map<string, any>();
+    for (const p of pools) {
+      if (p.variantId) {
+        poolByVariantId.set(p.variantId, {
+          id: p.id,
+          dealType: p.dealType,
+          teamPrice: p.teamPrice,
+          minBuyers: p.minBuyers,
+          currentBuyers: p.currentBuyers,
+          status: p.status,
+          committedQty: p.committedQty,
+          thresholdQtySnapshot: p.thresholdQtySnapshot,
+          deadlineAt: p.deadlineAt,
+          paymentWindowEndsAt: p.paymentWindowEndsAt,
+        });
+      }
+    }
+
+    return {
+      ...product,
+      variants: variants.map(v => ({
+        ...v,
+        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
+      })),
+      images: images.map(img => img.url),
+    };
+  }
+
   async listPublicProducts() {
     const products = await this.prisma.product.findMany({
       where: {
@@ -202,10 +269,10 @@ export class CatalogService {
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
-          dealType: p.dealType,               // 👈 ADDED
-          teamPrice: p.teamPrice,              // 👈 ADDED
-          minBuyers: p.minBuyers,              // 👈 ADDED
-          currentBuyers: p.currentBuyers,      // 👈 ADDED
+          dealType: p.dealType,
+          teamPrice: p.teamPrice,
+          minBuyers: p.minBuyers,
+          currentBuyers: p.currentBuyers,
           status: p.status,
           committedQty: p.committedQty,
           thresholdQtySnapshot: p.thresholdQtySnapshot,
@@ -300,10 +367,10 @@ export class CatalogService {
       if (p.variantId) {
         poolByVariantId.set(p.variantId, {
           id: p.id,
-          dealType: p.dealType,               // 👈 ADDED
-          teamPrice: p.teamPrice,              // 👈 ADDED
-          minBuyers: p.minBuyers,              // 👈 ADDED
-          currentBuyers: p.currentBuyers,      // 👈 ADDED
+          dealType: p.dealType,
+          teamPrice: p.teamPrice,
+          minBuyers: p.minBuyers,
+          currentBuyers: p.currentBuyers,
           status: p.status,
           committedQty: p.committedQty,
           thresholdQtySnapshot: p.thresholdQtySnapshot,

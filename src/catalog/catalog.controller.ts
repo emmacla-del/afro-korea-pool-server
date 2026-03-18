@@ -78,6 +78,12 @@ export class CatalogController {
     return this.catalogService.listPublicProducts();
   }
 
+  // 👇 NEW: Get a single product by ID
+  @Get('/products/:id')
+  async getProduct(@Param('id') id: string) {
+    return this.catalogService.findOne(id);
+  }
+
   // Supplier side (requires authentication)
   @Get('/supplier/products')
   @UseGuards(JwtAuthGuard)
