@@ -5,7 +5,8 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import { PrismaModule } from './prisma/prisma.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
-import { CheckinModule } from './checkin/checkin.module'; // 👈 NEW
+import { CheckinModule } from './checkin/checkin.module';
+import { NeighbourhoodModule } from './neighbourhood/neighbourhood.module'; // 👈 NEW
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
 import { PoolsModule } from './pools/pools.module';
@@ -31,7 +32,8 @@ import { AdminGuard } from './auth/admin.guard';
     }),
     PrismaModule,
     CloudinaryModule,
-    CheckinModule, // 👈 ADDED
+    CheckinModule,
+    NeighbourhoodModule, // 👈 ADDED
     PoolsModule,
     OrdersModule,
     SupplierModule,

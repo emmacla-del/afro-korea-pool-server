@@ -73,6 +73,16 @@ enum ProductCategory {
   ELECTRONICS
 }
 
+// 👇 NEW: Neighbourhood model
+model Neighbourhood {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  users     User[]   // users belonging to this neighbourhood
+  pools     Pool[]   // deals restricted to this neighbourhood
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model User {
   id        String   @id @default(uuid())
   name      String?
@@ -81,6 +91,10 @@ model User {
   role      UserRole @default(CUSTOMER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 👇 NEW: neighbourhood relation
+  neighbourhoodId String?
+  neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
 
   supplier    Supplier?
   commitments Commitment[] @relation("UserCommitments")
@@ -101,7 +115,6 @@ model User {
   referredCommitments Commitment[]        @relation("CommitmentReferrer")
   createdPools       Pool[]               @relation("PoolCreator")
 
-  // 👇 Relations for ReferralTransaction
   referrerTransactions ReferralTransaction[] @relation("ReferrerLinks")
   refereeTransactions ReferralTransaction[] @relation("RefereeLinks")
 }
@@ -191,6 +204,10 @@ model Pool {
   creatorId      String?
   creator        User?            @relation("PoolCreator", fields: [creatorId], references: [id])
   rewardQuantity Int?
+
+  // 👇 NEW: neighbourhood relation
+  neighbourhoodId String?
+  neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
 
   variant        ProductVariant?  @relation("VariantPools", fields: [variantId], references: [id])
   commitments    Commitment[]     @relation("PoolCommitments")
