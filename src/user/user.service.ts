@@ -18,6 +18,7 @@ export class UserService {
                         },
                     },
                 },
+                supplier: true, // 👈 added: include supplier details
             },
         });
         if (!user) throw new NotFoundException('User not found');
@@ -44,6 +45,7 @@ export class UserService {
                         },
                     },
                 },
+                supplier: true, // 👈 added for consistency
             },
         });
     }
