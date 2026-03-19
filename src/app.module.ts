@@ -6,7 +6,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { PrismaModule } from './prisma/prisma.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { CheckinModule } from './checkin/checkin.module';
-import { NeighbourhoodModule } from './neighbourhood/neighbourhood.module'; // 👈 NEW
+import { NeighbourhoodModule } from './neighbourhood/neighbourhood.module';
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders/orders.module';
 import { PoolsModule } from './pools/pools.module';
@@ -16,6 +16,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminController } from './admin/admin.controller';
 import { AdminGuard } from './auth/admin.guard';
+import { UserModule } from './user/user.module'; // 👈 ADD THIS
 
 @Module({
   imports: [
@@ -33,13 +34,14 @@ import { AdminGuard } from './auth/admin.guard';
     PrismaModule,
     CloudinaryModule,
     CheckinModule,
-    NeighbourhoodModule, // 👈 ADDED
+    NeighbourhoodModule,
     PoolsModule,
     OrdersModule,
     SupplierModule,
     DevModule,
     CatalogModule,
     AuthModule,
+    UserModule, // 👈 ADD THIS
   ],
   controllers: [HealthController, AdminController],
   providers: [AdminGuard],
