@@ -74,13 +74,7 @@ export class CatalogService {
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
-    const supplier = await this.prisma.supplier.findUnique({
-      where: { id: supplierId },
-      select: { verificationStatus: true },
-    });
-    if (!supplier || supplier.verificationStatus !== 'VERIFIED') {
-      throw new ForbiddenException('Your account must be verified to create products');
-    }
+    // ✅ Verification check removed – unverified suppliers can now create products
 
     // ✅ Upload all images to Cloudinary BEFORE the DB transaction
     const uploadedUrls: string[] = [];
@@ -130,7 +124,7 @@ export class CatalogService {
   }
   // ======================================================================
 
-  // 👇 NEW: Get a single product by ID
+  // 👇 Get a single product by ID
   async findOne(productId: string) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId, isActive: true },

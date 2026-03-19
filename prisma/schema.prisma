@@ -57,6 +57,7 @@ enum PurchaseOrderStatus {
 
 enum VerificationStatus {
   PENDING
+  UNVERIFIED
   VERIFIED
   REJECTED
 }
@@ -126,6 +127,7 @@ model User {
   role      UserRole @default(CUSTOMER)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  isBlocked Boolean @default(false) // 👈 add this line
 
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])

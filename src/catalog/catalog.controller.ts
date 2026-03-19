@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { requireUserId } from '../common/auth';
 import { CatalogService } from './catalog.service';
 
@@ -84,23 +84,23 @@ export class CatalogController {
     return this.catalogService.findOne(id);
   }
 
-  // Supplier side (requires authentication)
+  // Supplier side (requires authentication) – now using NotBlockedGuard
   @Get('/supplier/products')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async listSupplierProducts(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.listSupplierProducts(userId);
   }
 
   @Get('/supplier/products/summary')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async supplierProductsSummary(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.getSupplierProductsSummary(userId);
   }
 
   @Get('/supplier/catalog-imports/latest')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async latestCatalogImport(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     return this.catalogService.getLatestCatalogImport(userId);
@@ -108,7 +108,7 @@ export class CatalogController {
 
   // ✅ Multipart product creation — SKU auto-generated, not required from client
   @Post('/supplier/products')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async createProduct(@Req() req: FastifyRequest) {
     const userId = requireUserId(req);
     const parts = (req as any).parts();
@@ -161,7 +161,7 @@ export class CatalogController {
 
   // ✅ Delete a product (only if owned by the supplier)
   @Delete('/supplier/products/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async deleteProduct(@Req() req: FastifyRequest, @Param('id') id: string) {
     const userId = requireUserId(req);
     await this.catalogService.deleteProduct(userId, id);
@@ -169,7 +169,7 @@ export class CatalogController {
   }
 
   @Post('/supplier/variants')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async createVariant(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = createVariantSchema.parse(body);
@@ -177,7 +177,7 @@ export class CatalogController {
   }
 
   @Patch('/supplier/products/:id')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async patchProduct(
     @Req() req: FastifyRequest,
     @Param('id') id: string,
@@ -189,7 +189,7 @@ export class CatalogController {
   }
 
   @Patch('/supplier/products/:id/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async patchProductStatus(
     @Req() req: FastifyRequest,
     @Param('id') id: string,
@@ -201,7 +201,7 @@ export class CatalogController {
   }
 
   @Post('/supplier/catalog/import')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard)
   async importCatalog(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = importSchema.parse(body);

@@ -1,8 +1,13 @@
-import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
-import { UserRole } from '@prisma/client';
+import { UserRole, VerificationStatus } from '@prisma/client';
 import { ReferralService } from '../referral/referral.service';
 
 @Injectable()
@@ -26,16 +31,13 @@ export class AuthService {
     name?: string,
     referralCode?: string,
   ) {
-    // Validate supplier data upfront
     if (role === UserRole.SUPPLIER && !supplierData) {
       throw new BadRequestException('Supplier data required');
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Use a transaction to ensure atomicity
     const user = await this.prisma.$transaction(async (prisma) => {
-      // Create user
       let user;
       try {
         user = await prisma.user.create({
@@ -43,7 +45,7 @@ export class AuthService {
             phone,
             password: hashedPassword,
             role,
-            name: name || null,
+            name: name ?? null,
           },
         });
       } catch (error: any) {
@@ -53,15 +55,15 @@ export class AuthService {
         throw error;
       }
 
-      // If supplier, create supplier record
       if (role === UserRole.SUPPLIER && supplierData) {
         await prisma.supplier.create({
           data: {
             ownerUserId: user.id,
             displayName: supplierData.displayName,
             country: supplierData.country,
-            city: supplierData.city,
-            businessRegNumber: supplierData.businessRegNumber,
+            city: supplierData.city ?? null,
+            businessRegNumber: supplierData.businessRegNumber ?? null,
+            verificationStatus: VerificationStatus.UNVERIFIED,
           },
         });
       }
@@ -69,27 +71,37 @@ export class AuthService {
       return user;
     });
 
-    // Apply referral after transaction (optional)
     if (referralCode) {
       try {
         await this.referralService.applyReferral(user.id, referralCode);
       } catch (error) {
-        // Log error but do not fail registration
-        if (error instanceof Error) {
-          console.error('Failed to apply referral:', error.message);
-        } else {
-          console.error('Failed to apply referral:', String(error));
-        }
+        console.error(
+          'Failed to apply referral:',
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
 
-    return this.login(user);
+    return this._buildAuthResponse(user);
   }
 
   async login(user: any) {
-    if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+    return this._buildAuthResponse(user);
+  }
+
+  async validateUser(phone: string, password: string): Promise<any> {
+    const user = await this.prisma.user.findUnique({ where: { phone } });
+    if (user && (await bcrypt.compare(password, user.password))) {
+      const { password: _, ...result } = user;
+      return result;
     }
+    return null;
+  }
+
+  // ── Private helpers ──────────────────────────────────────────────────────
+
+  private _buildAuthResponse(user: any) {
     const payload = { sub: user.id, phone: user.phone, role: user.role };
     return {
       access_token: this.jwtService.sign(payload),
@@ -98,16 +110,8 @@ export class AuthService {
         phone: user.phone,
         role: user.role,
         name: user.name,
+        isBlocked: user.isBlocked, // 👈 added
       },
     };
-  }
-
-  async validateUser(phone: string, password: string): Promise<any> {
-    const user = await this.prisma.user.findUnique({ where: { phone } });
-    if (user && (await bcrypt.compare(password, user.password))) {
-      const { password, ...result } = user;
-      return result;
-    }
-    return null;
   }
 }

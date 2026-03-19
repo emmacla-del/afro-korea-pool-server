@@ -1,11 +1,11 @@
 import { Controller, Post, Get, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { requireUserId } from '../common/auth';
 import { CheckinService } from './checkin.service';
 
 @Controller('checkin')
-@UseGuards(JwtAuthGuard)
+@UseGuards(NotBlockedGuard) // 👈 now checks both JWT and block status
 export class CheckinController {
     constructor(private readonly checkinService: CheckinService) { }
 
@@ -15,7 +15,6 @@ export class CheckinController {
         try {
             return await this.checkinService.checkIn(userId);
         } catch (error) {
-            // ✅ Fix: cast error to Error type before accessing .message
             const message = error instanceof Error ? error.message : 'Check-in failed';
             throw new BadRequestException(message);
         }

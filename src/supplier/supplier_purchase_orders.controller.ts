@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { requireUserId } from '../common/auth';
 import { SupplierService } from './supplier.service';
 
@@ -10,9 +10,9 @@ const shipSchema = z.object({
 });
 
 @Controller()
-@UseGuards(JwtAuthGuard)
+@UseGuards(NotBlockedGuard) // 👈 now uses NotBlockedGuard
 export class SupplierPurchaseOrdersController {
-  constructor(private readonly supplierService: SupplierService) {}
+  constructor(private readonly supplierService: SupplierService) { }
 
   @Get('/supplier/purchase-orders')
   async list(@Req() req: FastifyRequest) {

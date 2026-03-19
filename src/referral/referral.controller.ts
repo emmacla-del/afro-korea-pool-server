@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Param, UseGuards, Req, Body, BadRequestException } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { requireUserId } from '../common/auth';
 import { ReferralService } from './referral.service';
 import { FastifyRequest } from 'fastify';
@@ -9,7 +9,7 @@ export class ReferralController {
     constructor(private readonly referralService: ReferralService) { }
 
     @Post('generate')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(NotBlockedGuard) // 👈 changed
     async generateCode(@Req() req: FastifyRequest) {
         const userId = requireUserId(req);
         const code = await this.referralService.generateCode(userId);
@@ -29,7 +29,7 @@ export class ReferralController {
     }
 
     @Get('stats')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(NotBlockedGuard) // 👈 changed
     async getStats(@Req() req: FastifyRequest) {
         const userId = requireUserId(req);
         return this.referralService.getReferralStats(userId);

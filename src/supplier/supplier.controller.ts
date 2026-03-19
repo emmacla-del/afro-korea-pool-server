@@ -1,11 +1,11 @@
 import { Controller, Post, UseGuards, Req } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { SupplierService } from './supplier.service';
 import { FastifyRequest } from 'fastify';
 import { requireUserId } from '../common/auth';
 
 @Controller('supplier')
-@UseGuards(JwtAuthGuard)
+@UseGuards(NotBlockedGuard) // 👈 now uses NotBlockedGuard
 export class SupplierController {
     constructor(private readonly supplierService: SupplierService) { }
 

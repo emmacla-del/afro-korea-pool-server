@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { requireUserId } from '../common/auth';
 import { PoolsService } from './pools.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -26,7 +26,7 @@ const createTeamDealSchema = z.object({
 export class PoolsController {
   constructor(
     private readonly poolsService: PoolsService,
-    private readonly prisma: PrismaService, // 👈 added for supplier check
+    private readonly prisma: PrismaService,
   ) { }
 
   // --- Existing endpoints ---
@@ -45,7 +45,7 @@ export class PoolsController {
   }
 
   @Post('/pools/:id/commit')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard) // 👈 changed
   async commit(@Req() req: FastifyRequest, @Param('id') poolId: string, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = commitSchema.parse(body);
@@ -62,7 +62,7 @@ export class PoolsController {
    * Supplier creates a team deal (Pinduoduo-style)
    */
   @Post('/pools/team')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard) // 👈 changed
   async createTeamDeal(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = createTeamDealSchema.parse(body);
@@ -95,7 +95,7 @@ export class PoolsController {
    * Customer joins a team deal
    */
   @Post('/pools/:id/join')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(NotBlockedGuard) // 👈 changed
   async joinTeamDeal(@Req() req: FastifyRequest, @Param('id') poolId: string) {
     const userId = requireUserId(req);
     return this.poolsService.joinTeamDeal(userId, poolId);

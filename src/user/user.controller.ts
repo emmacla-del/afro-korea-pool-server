@@ -1,9 +1,9 @@
 import { Controller, Get, Patch, Body, UseGuards, Req } from '@nestjs/common';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
 import { UserService } from './user.service';
 import { FastifyRequest } from 'fastify';
 
-// Extend FastifyRequest to include the user property set by JwtAuthGuard
+// Extend FastifyRequest to include the user property set by NotBlockedGuard
 interface RequestWithUser extends FastifyRequest {
     user: {
         sub: string;
@@ -23,14 +23,14 @@ export class UserController {
     }
 
     @Get('profile')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(NotBlockedGuard) // 👈 changed
     async getProfile(@Req() req: RequestWithUser) {
         const userId = req.user.sub;
         return this.userService.getProfile(userId);
     }
 
     @Patch('profile')
-    @UseGuards(JwtAuthGuard)
+    @UseGuards(NotBlockedGuard) // 👈 changed
     async updateProfile(@Req() req: RequestWithUser, @Body('neighbourhoodId') neighbourhoodId?: string) {
         const userId = req.user.sub;
         return this.userService.updateProfile(userId, { neighbourhoodId });
