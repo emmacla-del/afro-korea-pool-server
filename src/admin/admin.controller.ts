@@ -1,4 +1,13 @@
-import { Controller, Get, Patch, Param, UseGuards } from '@nestjs/common';
+import {
+    Controller,
+    Get,
+    Post,
+    Patch,
+    Delete,
+    Param,
+    Body,
+    UseGuards,
+} from '@nestjs/common';
 import { AdminGuard } from '../auth/admin.guard';
 import { AdminService } from './admin.service';
 
@@ -7,37 +16,65 @@ import { AdminService } from './admin.service';
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
 
-    // ---- Supplier verification ----
+    // ── Supplier verification ─────────────────────────────────────────────────
 
     @Get('suppliers/pending')
-    async getPendingSuppliers() {
+    getPendingSuppliers() {
         return this.adminService.getPendingSuppliers();
     }
 
     @Patch('suppliers/:id/verify')
-    async verifySupplier(@Param('id') supplierId: string) {
-        return this.adminService.verifySupplier(supplierId);
+    verifySupplier(@Param('id') supplierId: string) {
+        return this.adminService.setSupplierVerificationStatus(supplierId, 'VERIFIED');
     }
 
     @Patch('suppliers/:id/reject')
-    async rejectSupplier(@Param('id') supplierId: string) {
-        return this.adminService.rejectSupplier(supplierId);
+    rejectSupplier(@Param('id') supplierId: string) {
+        return this.adminService.setSupplierVerificationStatus(supplierId, 'REJECTED');
     }
 
-    // ---- User management ----
+    // ── User blocking ─────────────────────────────────────────────────────────
 
     @Get('users')
-    async getAllUsers() {
+    getAllUsers() {
         return this.adminService.getAllUsers();
     }
 
     @Patch('users/:userId/block')
-    async blockUser(@Param('userId') userId: string) {
+    blockUser(@Param('userId') userId: string) {
         return this.adminService.setUserBlockStatus(userId, true);
     }
 
     @Patch('users/:userId/unblock')
-    async unblockUser(@Param('userId') userId: string) {
+    unblockUser(@Param('userId') userId: string) {
         return this.adminService.setUserBlockStatus(userId, false);
+    }
+
+    // ── Product management ────────────────────────────────────────────────────
+
+    @Get('products')
+    getAllProducts() {
+        return this.adminService.getAllProducts();
+    }
+
+    @Patch('products/:id')
+    updateProduct(
+        @Param('id') productId: string,
+        @Body() body: { title?: string; isActive?: boolean; categoryId?: string },
+    ) {
+        return this.adminService.updateProduct(productId, body);
+    }
+
+    @Patch('products/:id/variant')
+    updateProductVariant(
+        @Param('id') productId: string,
+        @Body() body: { price?: number; stock?: number },
+    ) {
+        return this.adminService.updateProductVariant(productId, body);
+    }
+
+    @Delete('products/:id')
+    deleteProduct(@Param('id') productId: string) {
+        return this.adminService.deleteProduct(productId);
     }
 }

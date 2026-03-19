@@ -8,6 +8,7 @@ datasource db {
 }
 
 // ==================== ENUMS ====================
+
 enum UserRole {
   CUSTOMER
   SUPPLIER
@@ -56,8 +57,8 @@ enum PurchaseOrderStatus {
 }
 
 enum VerificationStatus {
-  PENDING
   UNVERIFIED
+  PENDING
   VERIFIED
   REJECTED
 }
@@ -73,15 +74,23 @@ enum DeliveryType {
   SATELLITE_HUB
 }
 
-enum ProductCategory {
-  FOOD_PRODUCE
-  TRANSFORMED_FOOD
-  HOUSEHOLD_EQUIPMENT
-  CONSTRUCTION_MATERIAL
-  ELECTRONICS
+// ==================== CATEGORIES ====================
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String                         // "Food & Produce"
+  emoji     String                         // "🥦"
+  slug      String   @unique               // "FOOD_PRODUCE"
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products Product[]
 }
 
 // ==================== GEOGRAPHIC HIERARCHY ====================
+
 model Region {
   id        String     @id @default(uuid())
   name      String     @unique
@@ -107,27 +116,27 @@ model Neighbourhood {
   name       String
   divisionId String
   division   Division @relation(fields: [divisionId], references: [id])
-  
-  // REQUIRED OPPOSITE RELATIONS (FIXES P1012 ERROR)
-  users      User[]
-  pools      Pool[]
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  users User[]
+  pools Pool[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([name, divisionId])
 }
 
 // ==================== USER & ROLES ====================
+
 model User {
   id        String   @id @default(uuid())
   name      String?
   phone     String?  @unique
   password  String
   role      UserRole @default(CUSTOMER)
+  isBlocked Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  isBlocked Boolean @default(false) // 👈 add this line
 
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
@@ -141,31 +150,30 @@ model User {
   referrer     User?   @relation("UserReferrals", fields: [referrerId], references: [id])
   referrals    User[]  @relation("UserReferrals")
   referralCode String? @unique
-  rewardBalance Int     @default(0)
+  rewardBalance Int    @default(0)
 
   superCreatorId String?
   superCreator   User?   @relation("TeamCreatorSuper", fields: [superCreatorId], references: [id])
   teamCreators   User[]  @relation("TeamCreatorSuper")
 
-  rewardTransactions RewardTransaction[] @relation("UserRewardTransactions")
-  referredCommitments Commitment[]        @relation("CommitmentReferrer")
+  rewardTransactions  RewardTransaction[]  @relation("UserRewardTransactions")
+  referredCommitments Commitment[]         @relation("CommitmentReferrer")
   createdPools        Pool[]               @relation("PoolCreator")
 
   referrerTransactions ReferralTransaction[] @relation("ReferrerLinks")
-  refereeTransactions ReferralTransaction[] @relation("RefereeLinks")
+  refereeTransactions  ReferralTransaction[] @relation("RefereeLinks")
 }
 
 model Supplier {
-  id                  String             @id @default(uuid())
-  ownerUserId         String             @unique
-  displayName         String
-  country             String
-  city                String?
-  verificationStatus  VerificationStatus @default(PENDING)
-  businessRegNumber   String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String             @id @default(uuid())
+  ownerUserId        String             @unique
+  displayName        String
+  country            String
+  city               String?
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  businessRegNumber  String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   owner          User            @relation(fields: [ownerUserId], references: [id])
   products       Product[]       @relation("SupplierProducts")
@@ -176,18 +184,20 @@ model Supplier {
 }
 
 // ==================== PRODUCT & INVENTORY ====================
+
 model Product {
   id          String   @id @default(uuid())
   supplierId  String
   title       String
   description String?
-  category    String?
-  catEnum     ProductCategory?
+  category    String?  // legacy free-text label — kept for backwards compat
+  categoryId  String?  // 👈 foreign key to Category table
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   supplier    Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
+  category_   Category?        @relation(fields: [categoryId], references: [id]) // 👈 new relation
   variants    ProductVariant[] @relation("ProductVariants")
   images      Image[]          @relation("ProductImages")
 }
@@ -203,58 +213,59 @@ model ProductVariant {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  product Product @relation("ProductVariants", fields: [productId], references: [id])
-  pools   Pool[]  @relation("VariantPools")
-  orders  Order[] @relation("VariantOrders")
+  product Product         @relation("ProductVariants", fields: [productId], references: [id])
+  pools   Pool[]          @relation("VariantPools")
+  orders  Order[]         @relation("VariantOrders")
 }
 
 model Image {
   id        String   @id @default(uuid())
-  product   Product  @relation("ProductImages", fields: [productId], references: [id], onDelete: Cascade)
   productId String
   url       String
   order     Int?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  product Product @relation("ProductImages", fields: [productId], references: [id], onDelete: Cascade)
+
   @@index([productId])
 }
 
 // ==================== AGGREGATION & POOLS ====================
+
 model Pool {
-  id                    String     @id @default(uuid())
-  variantId             String?
-  dealType              DealType   @default(MOQ_POOL)
-  thresholdQtySnapshot  Int
-  committedQty          Int        @default(0)
-  minBuyers             Int?
-  currentBuyers         Int?       @default(0)
-  teamPrice             Int?
-  unitPriceXafSnapshot  Int
-  status                PoolStatus @default(OPEN)
-  deadlineAt            DateTime
-  lockedAt              DateTime?
-  paymentWindowEndsAt   DateTime?
-  paidQty               Int        @default(0)
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
+  id                   String     @id @default(uuid())
+  variantId            String?
+  dealType             DealType   @default(MOQ_POOL)
+  thresholdQtySnapshot Int
+  committedQty         Int        @default(0)
+  minBuyers            Int?
+  currentBuyers        Int?       @default(0)
+  teamPrice            Int?
+  unitPriceXafSnapshot Int
+  status               PoolStatus @default(OPEN)
+  deadlineAt           DateTime
+  lockedAt             DateTime?
+  paymentWindowEndsAt  DateTime?
+  paidQty              Int        @default(0)
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   creatorId      String?
-  creator        User?            @relation("PoolCreator", fields: [creatorId], references: [id])
+  creator        User?          @relation("PoolCreator", fields: [creatorId], references: [id])
   rewardQuantity Int?
 
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation(fields: [neighbourhoodId], references: [id])
-  
-  // HUB DETAILS
+
   hubAddress      String?
   hubContactPhone String?
   hubName         String?
 
-  variant        ProductVariant?  @relation("VariantPools", fields: [variantId], references: [id])
-  commitments    Commitment[]     @relation("PoolCommitments")
-  purchaseOrder  PurchaseOrder?
-  orders         Order[]          @relation("PoolOrders")
+  variant       ProductVariant?  @relation("VariantPools", fields: [variantId], references: [id])
+  commitments   Commitment[]     @relation("PoolCommitments")
+  purchaseOrder PurchaseOrder?
+  orders        Order[]          @relation("PoolOrders")
 
   @@index([variantId])
   @@index([status, deadlineAt])
@@ -271,10 +282,10 @@ model Commitment {
   updatedAt DateTime         @updatedAt
 
   referrerId String?
-  referrer   User?       @relation("CommitmentReferrer", fields: [referrerId], references: [id])
+  referrer   User?  @relation("CommitmentReferrer", fields: [referrerId], references: [id])
 
-  pool Pool @relation("PoolCommitments", fields: [poolId], references: [id])
-  user User @relation("UserCommitments", fields: [userId], references: [id])
+  pool  Pool       @relation("PoolCommitments", fields: [poolId], references: [id])
+  user  User       @relation("UserCommitments", fields: [userId], references: [id])
   order Order?
 
   @@unique([poolId, userId])
@@ -283,34 +294,34 @@ model Commitment {
 }
 
 // ==================== TRANSACTIONS & FULFILLMENT ====================
-model Order {
-  id             String      @id @default(uuid())
-  userId         String
-  supplierId     String
-  variantId      String?
-  qty            Int
-  poolId         String?
-  commitmentId   String?     @unique
-  unitPriceXaf   Int
-  amountXaf      Int
-  status         OrderStatus @default(PENDING_PAYMENT)
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
 
-  // LOGISTICS UPGRADES
+model Order {
+  id           String      @id @default(uuid())
+  userId       String
+  supplierId   String
+  variantId    String?
+  qty          Int
+  poolId       String?
+  commitmentId String?     @unique
+  unitPriceXaf Int
+  amountXaf    Int
+  status       OrderStatus @default(PENDING_PAYMENT)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
   deliveryType    DeliveryType @default(HUB_PICKUP)
   satelliteFeeXaf Int          @default(0)
   deliveryMethod  String?
   pickupPoint     String?
   deliveryAddress String?
 
-  pool        Pool?           @relation("PoolOrders", fields: [poolId], references: [id])
-  commitment  Commitment?     @relation(fields: [commitmentId], references: [id])
-  payments    Payment[]       @relation("OrderPayments")
-  purchaseOrder PurchaseOrder? @relation("DirectOrder")
-  user        User            @relation("UserOrders", fields: [userId], references: [id])
-  supplier    Supplier        @relation("SupplierOrders", fields: [supplierId], references: [id])
-  variant     ProductVariant? @relation("VariantOrders", fields: [variantId], references: [id])
+  pool          Pool?           @relation("PoolOrders", fields: [poolId], references: [id])
+  commitment    Commitment?     @relation(fields: [commitmentId], references: [id])
+  payments      Payment[]       @relation("OrderPayments")
+  purchaseOrder PurchaseOrder?  @relation("DirectOrder")
+  user          User            @relation("UserOrders", fields: [userId], references: [id])
+  supplier      Supplier        @relation("SupplierOrders", fields: [supplierId], references: [id])
+  variant       ProductVariant? @relation("VariantOrders", fields: [variantId], references: [id])
 
   @@index([userId, createdAt])
   @@index([supplierId, createdAt])
@@ -334,22 +345,22 @@ model Payment {
 }
 
 model PurchaseOrder {
-  id              String              @id @default(uuid())
-  supplierId      String
-  source          PurchaseOrderSource @default(POOL)
-  poolId          String?             @unique
-  directOrderId   String?             @unique
-  status          PurchaseOrderStatus @default(PENDING_SUPPLIER_CONFIRM)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  
-  totalLogisticsSavingsXaf Int        @default(0)
+  id            String              @id @default(uuid())
+  supplierId    String
+  source        PurchaseOrderSource @default(POOL)
+  poolId        String?             @unique
+  directOrderId String?             @unique
+  status        PurchaseOrderStatus @default(PENDING_SUPPLIER_CONFIRM)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
-  supplier      Supplier            @relation(fields: [supplierId], references: [id])
-  pool          Pool?               @relation(fields: [poolId], references: [id])
-  directOrder   Order?              @relation("DirectOrder", fields: [directOrderId], references: [id])
-  items         PurchaseOrderItem[]
-  events        FulfillmentEvent[]
+  totalLogisticsSavingsXaf Int @default(0)
+
+  supplier    Supplier           @relation(fields: [supplierId], references: [id])
+  pool        Pool?              @relation(fields: [poolId], references: [id])
+  directOrder Order?             @relation("DirectOrder", fields: [directOrderId], references: [id])
+  items       PurchaseOrderItem[]
+  events      FulfillmentEvent[]
 }
 
 model PurchaseOrderItem {
@@ -378,6 +389,7 @@ model FulfillmentEvent {
 }
 
 // ==================== REWARDS & ENGAGEMENT ====================
+
 model UserCheckIn {
   id          String   @id @default(uuid())
   userId      String
@@ -389,35 +401,36 @@ model UserCheckIn {
 }
 
 model Reward {
-  id          String   @id @default(uuid())
-  title       String
-  amount      Int
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  title     String
+  amount    Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ReferralTransaction {
-  id          String   @id @default(uuid())
-  referrerId  String
-  refereeId   String
-  amount      Int
-  status      String   @default("COMPLETED")
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  referrerId String
+  refereeId  String
+  amount     Int
+  status     String   @default("COMPLETED")
+  createdAt  DateTime @default(now())
 
-  referrer    User     @relation("ReferrerLinks", fields: [referrerId], references: [id])
-  referee     User     @relation("RefereeLinks", fields: [refereeId], references: [id])
+  referrer User @relation("ReferrerLinks", fields: [referrerId], references: [id])
+  referee  User @relation("RefereeLinks", fields: [refereeId], references: [id])
 }
 
 model RewardTransaction {
   id          String   @id @default(uuid())
   userId      String
-  user        User     @relation("UserRewardTransactions", fields: [userId], references: [id])
   amount      Int
   type        String   @default("OTHER")
   description String
   referenceId String?
   createdAt   DateTime @default(now())
+
+  user User @relation("UserRewardTransactions", fields: [userId], references: [id])
 
   @@index([type])
 }
