@@ -45,7 +45,28 @@ export class AdminService {
         });
     }
 
-    // ---- User blocking ----
+    // ---- User management ----
+
+    async getAllUsers() {
+        return this.prisma.user.findMany({
+            select: {
+                id: true,
+                name: true,
+                phone: true,
+                role: true,
+                isBlocked: true,
+                createdAt: true,
+                supplier: {
+                    select: {
+                        id: true,
+                        displayName: true,
+                        verificationStatus: true,
+                    },
+                },
+            },
+            orderBy: { createdAt: 'desc' },
+        });
+    }
 
     async setUserBlockStatus(userId: string, blocked: boolean) {
         const user = await this.prisma.user.findUnique({

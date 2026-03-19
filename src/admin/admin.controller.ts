@@ -7,6 +7,8 @@ import { AdminService } from './admin.service';
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
 
+    // ---- Supplier verification ----
+
     @Get('suppliers/pending')
     async getPendingSuppliers() {
         return this.adminService.getPendingSuppliers();
@@ -20,6 +22,13 @@ export class AdminController {
     @Patch('suppliers/:id/reject')
     async rejectSupplier(@Param('id') supplierId: string) {
         return this.adminService.rejectSupplier(supplierId);
+    }
+
+    // ---- User management ----
+
+    @Get('users')
+    async getAllUsers() {
+        return this.adminService.getAllUsers();
     }
 
     @Patch('users/:userId/block')
