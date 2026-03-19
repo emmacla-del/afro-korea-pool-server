@@ -15,8 +15,9 @@ import { DevModule } from './dev/dev.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { AuthModule } from './auth/auth.module';
 import { AdminController } from './admin/admin.controller';
+import { AdminService } from './admin/admin.service'; // 👈 add
 import { AdminGuard } from './auth/admin.guard';
-import { UserModule } from './user/user.module'; // 👈 ADD THIS
+import { UserModule } from './user/user.module';
 
 @Module({
   imports: [
@@ -41,9 +42,9 @@ import { UserModule } from './user/user.module'; // 👈 ADD THIS
     DevModule,
     CatalogModule,
     AuthModule,
-    UserModule, // 👈 ADD THIS
+    UserModule,
   ],
   controllers: [HealthController, AdminController],
-  providers: [AdminGuard],
+  providers: [AdminGuard, AdminService], // 👈 add AdminService
 })
 export class AppModule { }
