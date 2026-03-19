@@ -4,7 +4,6 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { v2 as cloudinary } from 'cloudinary';
 
-// Configure Cloudinary from environment variables
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
@@ -14,6 +13,8 @@ cloudinary.config({
 @Injectable()
 export class CatalogService {
   constructor(private prisma: PrismaService) { }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   private async getSupplierIdForUser(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -27,7 +28,6 @@ export class CatalogService {
     return user.supplier.id;
   }
 
-  // ✅ Auto-generate a unique SKU — supplier never needs to provide one
   private generateSku(): string {
     const prefix = 'SKU';
     const timestamp = Date.now().toString(36).toUpperCase();
@@ -35,7 +35,14 @@ export class CatalogService {
     return `${prefix}-${timestamp}-${randomPart}`;
   }
 
-  // ✅ Upload a single file buffer to Cloudinary and return the secure URL
+  // ── Photo lab ─────────────────────────────────────────────────────────────
+  // Every product image is normalised to 800×800px on upload:
+  //   • crop: pad   → full image always visible, no cropping
+  //   • background: white → uniform white padding across all products
+  //   • gravity: center   → product always centered
+  //   • quality: auto:best + fetch_format: auto → crisp, small file, webp/avif
+  //   • effect: sharpen:60 → crisp edges after resize
+
   private async uploadToCloudinary(
     buffer: Buffer,
     filename: string,
@@ -47,6 +54,20 @@ export class CatalogService {
           folder: 'products',
           public_id: `${randomUUID()}-${filename.replace(/\.[^/.]+$/, '')}`,
           resource_type: 'image',
+          transformation: [
+            {
+              width: 800,
+              height: 800,
+              crop: 'pad',
+              background: 'white',
+              gravity: 'center',
+            },
+            {
+              quality: 'auto:best',
+              fetch_format: 'auto',
+              effect: 'sharpen:60',
+            },
+          ],
         },
         (error, result) => {
           if (error || !result) {
@@ -60,7 +81,21 @@ export class CatalogService {
     });
   }
 
-  // ==================== Product creation with images ====================
+  // Injects photo lab transformations into existing Cloudinary URLs.
+  // Handles images uploaded before this change — no re-upload needed.
+  // Cloudinary applies the transformation dynamically on first fetch
+  // and caches the result on their CDN.
+  private normaliseImageUrl(url: string): string {
+    if (!url.includes('cloudinary.com')) return url;
+    if (url.includes('/upload/w_800')) return url; // already normalised
+    return url.replace(
+      '/upload/',
+      '/upload/w_800,h_800,c_pad,b_white,g_center,q_auto:best,f_auto,e_sharpen:60/',
+    );
+  }
+
+  // ── Product creation with images ──────────────────────────────────────────
+
   async createProductWithImages(
     userId: string,
     data: {
@@ -74,9 +109,7 @@ export class CatalogService {
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
-    // ✅ Verification check removed – unverified suppliers can now create products
-
-    // ✅ Upload all images to Cloudinary BEFORE the DB transaction
+    // Upload all images through the photo lab before the DB transaction
     const uploadedUrls: string[] = [];
     for (const file of files) {
       const url = await this.uploadToCloudinary(file.buffer, file.filename, file.mimetype);
@@ -93,7 +126,6 @@ export class CatalogService {
         },
       });
 
-      // ✅ SKU is auto-generated — supplier never provides one
       const sku = this.generateSku();
 
       await tx.productVariant.create({
@@ -122,9 +154,9 @@ export class CatalogService {
       return product;
     });
   }
-  // ======================================================================
 
-  // 👇 Get a single product by ID
+  // ── findOne ───────────────────────────────────────────────────────────────
+
   async findOne(productId: string) {
     const product = await this.prisma.product.findUnique({
       where: { id: productId, isActive: true },
@@ -187,9 +219,11 @@ export class CatalogService {
         ...v,
         pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
       })),
-      images: images.map(img => img.url),
+      images: images.map(img => this.normaliseImageUrl(img.url)),
     };
   }
+
+  // ── listPublicProducts ────────────────────────────────────────────────────
 
   async listPublicProducts() {
     const products = await this.prisma.product.findMany({
@@ -297,10 +331,14 @@ export class CatalogService {
           ...v,
           pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
         })),
-        images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url),
+        images: (imagesByProductId.get(p.id) ?? []).map(
+          (img) => this.normaliseImageUrl(img.url),
+        ),
       };
     });
   }
+
+  // ── listSupplierProducts ──────────────────────────────────────────────────
 
   async listSupplierProducts(userId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
@@ -380,9 +418,13 @@ export class CatalogService {
         ...v,
         pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
       })),
-      images: (imagesByProductId.get(p.id) ?? []).map((img) => img.url),
+      images: (imagesByProductId.get(p.id) ?? []).map(
+        (img) => this.normaliseImageUrl(img.url),
+      ),
     }));
   }
+
+  // ── getSupplierProductsSummary ────────────────────────────────────────────
 
   async getSupplierProductsSummary(userId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
@@ -400,6 +442,8 @@ export class CatalogService {
     return { total, openPool };
   }
 
+  // ── getLatestCatalogImport ────────────────────────────────────────────────
+
   async getLatestCatalogImport(userId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
@@ -411,6 +455,8 @@ export class CatalogService {
 
     return { lastImportedAt: latest?.createdAt ?? null };
   }
+
+  // ── createProduct ─────────────────────────────────────────────────────────
 
   async createProduct(
     userId: string,
@@ -429,11 +475,13 @@ export class CatalogService {
     });
   }
 
+  // ── createVariant ─────────────────────────────────────────────────────────
+
   async createVariant(
     userId: string,
     input: {
       productId: string;
-      sku?: string; // ✅ optional — auto-generated if not provided
+      sku?: string;
       unitPriceXaf: number;
       thresholdQty: number;
       leadTimeDays?: number;
@@ -467,6 +515,8 @@ export class CatalogService {
       throw err;
     }
   }
+
+  // ── updateSupplierProduct ─────────────────────────────────────────────────
 
   async updateSupplierProduct(
     userId: string,
@@ -505,6 +555,8 @@ export class CatalogService {
 
     return this.getSupplierProductById(supplierId, productId);
   }
+
+  // ── updateSupplierProductPoolStatus ──────────────────────────────────────
 
   async updateSupplierProductPoolStatus(
     userId: string,
@@ -567,6 +619,8 @@ export class CatalogService {
     return product;
   }
 
+  // ── deleteProduct ─────────────────────────────────────────────────────────
+
   async deleteProduct(userId: string, productId: string) {
     const supplierId = await this.getSupplierIdForUser(userId);
     const product = await this.prisma.product.findUnique({
@@ -584,7 +638,6 @@ export class CatalogService {
       const variantIds = variants.map((v) => v.id);
 
       if (variantIds.length > 0) {
-        // Nullify foreign keys before deleting variants
         await tx.pool.updateMany({
           where: { variantId: { in: variantIds } },
           data: { variantId: null },
@@ -596,13 +649,14 @@ export class CatalogService {
         await tx.productVariant.deleteMany({ where: { productId } });
       }
 
-      // Delete images then the product
       await tx.image.deleteMany({ where: { productId } });
       await tx.product.delete({ where: { id: productId } });
     });
 
     return { success: true };
   }
+
+  // ── importCatalog ─────────────────────────────────────────────────────────
 
   async importCatalog(
     userId: string,
@@ -612,7 +666,7 @@ export class CatalogService {
         description?: string;
         category?: string;
         variants: Array<{
-          sku?: string; // ✅ optional — auto-generated if not provided
+          sku?: string;
           unitPriceXaf: number;
           thresholdQty: number;
           leadTimeDays?: number;
@@ -648,7 +702,7 @@ export class CatalogService {
             data: productInput.variants.map((v) => ({
               id: randomUUID(),
               productId: product.id,
-              sku: v.sku ?? this.generateSku(), // ✅ auto-generate if not provided
+              sku: v.sku ?? this.generateSku(),
               unitPriceXaf: v.unitPriceXaf,
               thresholdQty: v.thresholdQty,
               leadTimeDays: v.leadTimeDays ?? 14,
