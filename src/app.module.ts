@@ -14,9 +14,9 @@ import { SupplierModule } from './supplier/supplier.module';
 import { DevModule } from './dev/dev.module';
 import { CatalogModule } from './catalog/catalog.module';
 import { AuthModule } from './auth/auth.module';
-import { AdminController } from './admin/admin.controller';
-import { AdminService } from './admin/admin.service'; // 👈 add
+import { AdminModule } from './admin/admin.module'; // 👈 new
 import { AdminGuard } from './auth/admin.guard';
+import { NotBlockedGuard } from './auth/not-blocked.guard'; // 👈 new
 import { UserModule } from './user/user.module';
 
 @Module({
@@ -42,9 +42,10 @@ import { UserModule } from './user/user.module';
     DevModule,
     CatalogModule,
     AuthModule,
+    AdminModule, // 👈 replaces direct AdminController + AdminService
     UserModule,
   ],
-  controllers: [HealthController, AdminController],
-  providers: [AdminGuard, AdminService], // 👈 add AdminService
+  controllers: [HealthController],
+  providers: [AdminGuard, NotBlockedGuard], // 👈 AdminService moved into AdminModule
 })
 export class AppModule { }
