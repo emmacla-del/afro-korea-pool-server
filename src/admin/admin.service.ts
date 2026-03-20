@@ -171,6 +171,78 @@ export class AdminService {
         return { success: true, productId };
     }
 
+    // ── Order management ───────────────────────────────────────────────────────
+
+    async getAllOrders(filters: {
+        status?: string;
+        neighbourhoodId?: string;
+        dateFrom?: string;
+        dateTo?: string;
+    }) {
+        const where: any = {};
+
+        if (filters.status) {
+            where.status = filters.status;
+        }
+
+        if (filters.dateFrom || filters.dateTo) {
+            where.createdAt = {
+                ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+                ...(filters.dateTo ? { lte: new Date(filters.dateTo) } : {}),
+            };
+        }
+
+        // Filter by neighbourhood — orders don't have neighbourhoodId directly,
+        // but the user and pool do. We check either the user's neighbourhood
+        // OR the pool's neighbourhood.
+        if (filters.neighbourhoodId) {
+            where.OR = [
+                { user: { neighbourhoodId: filters.neighbourhoodId } },
+                { pool: { neighbourhoodId: filters.neighbourhoodId } },
+            ];
+        }
+
+        return this.prisma.order.findMany({
+            where,
+            include: {
+                user: { select: { id: true, name: true, phone: true, neighbourhoodId: true } },
+                supplier: { select: { id: true, displayName: true } },
+                variant: { include: { product: { select: { id: true, title: true } } } },
+                pool: { select: { id: true, status: true, neighbourhoodId: true } },
+                payments: { select: { id: true, provider: true, status: true, amountXaf: true } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 200,
+        });
+    }
+
+    async getOrderDetail(orderId: string) {
+        const order = await this.prisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+                user: { select: { id: true, name: true, phone: true } },
+                supplier: { select: { id: true, displayName: true, city: true, country: true } },
+                variant: { include: { product: true } },
+                pool: { include: { neighbourhood: true } },
+                payments: true,
+                purchaseOrder: { include: { events: { orderBy: { createdAt: 'desc' } } } },
+            },
+        });
+        if (!order) throw new NotFoundException('Order not found');
+        return order;
+    }
+
+    async updateOrderStatus(orderId: string, status: string) {
+        const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+        if (!order) throw new NotFoundException('Order not found');
+
+        return this.prisma.order.update({
+            where: { id: orderId },
+            data: { status: status as any },
+            select: { id: true, status: true, updatedAt: true },
+        });
+    }
+
     // ── Analytics ──────────────────────────────────────────────────────────────
 
     async getAnalyticsOverview() {

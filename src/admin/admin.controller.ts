@@ -6,6 +6,7 @@ import {
     Delete,
     Param,
     Body,
+    Query,
     UseGuards,
 } from '@nestjs/common';
 import { AdminGuard } from '../auth/admin.guard';
@@ -21,6 +22,31 @@ export class AdminController {
     @Get('analytics/overview')
     getAnalyticsOverview() {
         return this.adminService.getAnalyticsOverview();
+    }
+
+    // ── Orders ─────────────────────────────────────────────────────────────────
+
+    @Get('orders')
+    getAllOrders(
+        @Query('status') status?: string,
+        @Query('neighbourhoodId') neighbourhoodId?: string,
+        @Query('dateFrom') dateFrom?: string,
+        @Query('dateTo') dateTo?: string,
+    ) {
+        return this.adminService.getAllOrders({ status, neighbourhoodId, dateFrom, dateTo });
+    }
+
+    @Get('orders/:id')
+    getOrderDetail(@Param('id') orderId: string) {
+        return this.adminService.getOrderDetail(orderId);
+    }
+
+    @Patch('orders/:id/status')
+    updateOrderStatus(
+        @Param('id') orderId: string,
+        @Body() body: { status: string },
+    ) {
+        return this.adminService.updateOrderStatus(orderId, body.status);
     }
 
     // ── Supplier verification ──────────────────────────────────────────────────
