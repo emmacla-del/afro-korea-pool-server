@@ -1,7 +1,6 @@
 import {
     Controller,
     Get,
-    Post,
     Patch,
     Delete,
     Param,
@@ -69,8 +68,22 @@ export class AdminController {
     // ── User blocking ──────────────────────────────────────────────────────────
 
     @Get('users')
-    getAllUsers() {
-        return this.adminService.getAllUsers();
+    getAllUsers(
+        @Query('page') page?: string,
+        @Query('pageSize') pageSize?: string,
+        @Query('search') search?: string,
+        @Query('role') role?: string,
+        @Query('blocked') blocked?: string,
+        @Query('sortBy') sortBy?: string,
+    ) {
+        return this.adminService.getAllUsers({
+            page: page ? Number(page) : undefined,
+            pageSize: pageSize ? Number(pageSize) : undefined,
+            search,
+            role,
+            blocked,
+            sortBy,
+        });
     }
 
     @Patch('users/:userId/block')

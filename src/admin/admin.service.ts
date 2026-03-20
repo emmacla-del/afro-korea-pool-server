@@ -39,25 +39,69 @@ export class AdminService {
 
     // ── User blocking ──────────────────────────────────────────────────────────
 
-    async getAllUsers() {
-        return this.prisma.user.findMany({
-            select: {
-                id: true,
-                name: true,
-                phone: true,
-                role: true,
-                isBlocked: true,
-                createdAt: true,
-                supplier: {
-                    select: {
-                        id: true,
-                        displayName: true,
-                        verificationStatus: true,
+    // ── User management ────────────────────────────────────────────────────────
+
+    async getAllUsers(filters: {
+        page?: number;
+        pageSize?: number;
+        search?: string;
+        role?: string;
+        blocked?: string;
+        sortBy?: string;
+    } = {}) {
+        const page = Math.max(1, Number(filters.page) || 1);
+        const pageSize = Math.min(100, Number(filters.pageSize) || 50);
+        const skip = (page - 1) * pageSize;
+
+        const where: any = {};
+
+        // Search by name OR phone (case-insensitive)
+        if (filters.search) {
+            where.OR = [
+                { name: { contains: filters.search, mode: 'insensitive' } },
+                { phone: { contains: filters.search, mode: 'insensitive' } },
+            ];
+        }
+
+        // Role filter
+        if (filters.role && filters.role !== 'ALL') {
+            where.role = filters.role;
+        }
+
+        // Blocked filter
+        if (filters.blocked === 'true') where.isBlocked = true;
+        else if (filters.blocked === 'false') where.isBlocked = false;
+
+        // Sort
+        const [sortField, sortDir] = (filters.sortBy ?? 'createdAt_desc').split('_');
+        const orderBy = { [sortField]: sortDir === 'asc' ? 'asc' : 'desc' };
+
+        const [users, total] = await this.prisma.$transaction([
+            this.prisma.user.findMany({
+                where,
+                select: {
+                    id: true,
+                    name: true,
+                    phone: true,
+                    role: true,
+                    isBlocked: true,
+                    createdAt: true,
+                    supplier: {
+                        select: {
+                            id: true,
+                            displayName: true,
+                            verificationStatus: true,
+                        },
                     },
                 },
-            },
-            orderBy: { createdAt: 'desc' },
-        });
+                orderBy,
+                skip,
+                take: pageSize,
+            }),
+            this.prisma.user.count({ where }),
+        ]);
+
+        return { users, total };
     }
 
     async setUserBlockStatus(userId: string, blocked: boolean) {
