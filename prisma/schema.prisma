@@ -162,6 +162,11 @@ model User {
 
   referrerTransactions ReferralTransaction[] @relation("ReferrerLinks")
   refereeTransactions  ReferralTransaction[] @relation("RefereeLinks")
+
+  // 👇 NEW NOTIFICATION FIELDS
+  pushTokens     PushToken[]         @relation("UserPushTokens")
+  notifications  InAppNotification[] @relation("UserNotifications")
+  whatsappOptOut Boolean             @default(false)
 }
 
 model Supplier {
@@ -433,4 +438,75 @@ model RewardTransaction {
   user User @relation("UserRewardTransactions", fields: [userId], references: [id])
 
   @@index([type])
+}
+
+// ==================== NOTIFICATIONS (NEW) ====================
+
+model PushToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String   // "android" | "ios" | "web"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation("UserPushTokens", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model InAppNotification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      String   @default("INFO")  // "INFO" | "ORDER" | "POOL" | "SYSTEM" | "PROMO"
+  isRead    Boolean  @default(false)
+  deepLink  String?
+  imageUrl  String?
+  refId     String?
+  createdAt DateTime @default(now())
+
+  user User @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([userId, createdAt])
+}
+
+model NotificationLog {
+  id          String   @id @default(uuid())
+  title       String
+  body        String
+  deepLink    String?
+  audience    String
+  channels    String[]
+  status      String   @default("PENDING")
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  pushCount   Int      @default(0)
+  inAppCount  Int      @default(0)
+  waCount     Int      @default(0)
+  failCount   Int      @default(0)
+  createdBy   String?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model WhatsAppLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  phone        String
+  templateName String?
+  message      String
+  status       String   @default("PENDING")
+  providerRef  String?
+  error        String?
+  createdAt    DateTime @default(now())
+
+  @@index([phone])
+  @@index([status])
 }

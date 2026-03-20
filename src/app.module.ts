@@ -18,7 +18,8 @@ import { AdminModule } from './admin/admin.module';
 import { AdminGuard } from './auth/admin.guard';
 import { NotBlockedGuard } from './auth/not-blocked.guard';
 import { UserModule } from './user/user.module';
-import { CategoryModule } from './category/category.module'; // 👈 ADD THIS
+import { CategoryModule } from './category/category.module';
+import { NotificationsModule } from './notifications/notifications.module'; // 👈 ADD THIS
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { CategoryModule } from './category/category.module'; // 👈 ADD THIS
     AuthModule,
     AdminModule,
     UserModule,
-    CategoryModule, // 👈 ADD THIS
+    CategoryModule,
+    NotificationsModule, // 👈 ADD THIS
   ],
   controllers: [HealthController],
   providers: [AdminGuard, NotBlockedGuard],
