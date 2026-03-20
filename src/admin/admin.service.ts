@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AdminService {
     constructor(private readonly prisma: PrismaService) { }
 
-    // ── Supplier verification ─────────────────────────────────────────────────
+    // ── Supplier verification ──────────────────────────────────────────────────
 
     async getPendingSuppliers() {
         return this.prisma.supplier.findMany({
@@ -37,7 +37,7 @@ export class AdminService {
         });
     }
 
-    // ── User blocking ─────────────────────────────────────────────────────────
+    // ── User blocking ──────────────────────────────────────────────────────────
 
     async getAllUsers() {
         return this.prisma.user.findMany({
@@ -71,7 +71,7 @@ export class AdminService {
         });
     }
 
-    // ── Product management ────────────────────────────────────────────────────
+    // ── Product management ─────────────────────────────────────────────────────
 
     async getAllProducts() {
         return this.prisma.product.findMany({
@@ -169,5 +169,125 @@ export class AdminService {
         });
 
         return { success: true, productId };
+    }
+
+    // ── Analytics ──────────────────────────────────────────────────────────────
+
+    async getAnalyticsOverview() {
+        // Build date boundaries for the last 7 days.
+        // Each "day" is a UTC calendar day. Index 0 = 6 days ago, index 6 = today.
+        const now = new Date();
+        const days: { label: string; start: Date; end: Date }[] = [];
+
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date(now);
+            d.setUTCDate(d.getUTCDate() - i);
+            const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0));
+            const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
+            const label = start.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
+            days.push({ label, start, end });
+        }
+
+        const since = days[0].start; // 6 days ago midnight UTC
+
+        // Run all queries in parallel for speed
+        const [
+            signupRows,
+            orderRows,
+            revenueRows,
+            suppliersVerified,
+            suppliersPending,
+            topProductRows,
+        ] = await Promise.all([
+
+            // 1. User signups grouped by day
+            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
+                       COUNT(*) AS count
+                FROM "User"
+                WHERE "createdAt" >= ${since}
+                GROUP BY day
+                ORDER BY day ASC
+            `,
+
+            // 2. Orders grouped by day (all statuses — adjust if you only want PAID)
+            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`
+                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
+                       COUNT(*) AS count
+                FROM "Order"
+                WHERE "createdAt" >= ${since}
+                GROUP BY day
+                ORDER BY day ASC
+            `,
+
+            // 3. Revenue (sum of amountXaf for PAID orders) grouped by day
+            this.prisma.$queryRaw<{ day: Date; total: bigint }[]>`
+                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
+                       COALESCE(SUM("amountXaf"), 0) AS total
+                FROM "Order"
+                WHERE "createdAt" >= ${since}
+                  AND "status" = 'PAID'
+                GROUP BY day
+                ORDER BY day ASC
+            `,
+
+            // 4. Count of verified suppliers
+            this.prisma.supplier.count({
+                where: { verificationStatus: VerificationStatus.VERIFIED },
+            }),
+
+            // 5. Count of pending suppliers
+            this.prisma.supplier.count({
+                where: { verificationStatus: VerificationStatus.PENDING },
+            }),
+
+            // 6. Top 5 products by units sold (qty) in last 7 days
+            this.prisma.$queryRaw<{ title: string; unitsSold: bigint }[]>`
+                SELECT p.title,
+                       COALESCE(SUM(o.qty), 0) AS "unitsSold"
+                FROM "Order" o
+                JOIN "ProductVariant" pv ON pv.id = o."variantId"
+                JOIN "Product" p ON p.id = pv."productId"
+                WHERE o."createdAt" >= ${since}
+                GROUP BY p.id, p.title
+                ORDER BY "unitsSold" DESC
+                LIMIT 5
+            `,
+        ]);
+
+        // Map raw query rows back onto the 7 fixed day slots.
+        // $queryRaw returns BigInt for COUNT/SUM — convert to Number.
+        const toMap = (rows: { day: Date; count?: bigint; total?: bigint }[]) => {
+            const m = new Map<string, number>();
+            for (const row of rows) {
+                const key = new Date(row.day).toISOString().slice(0, 10); // "YYYY-MM-DD"
+                m.set(key, Number(row.count ?? row.total ?? 0));
+            }
+            return m;
+        };
+
+        const signupMap = toMap(signupRows);
+        const orderMap = toMap(orderRows);
+        const revenueMap = toMap(revenueRows as any);
+
+        const signupsPerDay = days.map(d => signupMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
+        const ordersPerDay = days.map(d => orderMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
+        const revenuePerDay = days.map(d => revenueMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
+        const dayLabels = days.map(d => d.label);
+
+        const topProducts = topProductRows.map(r => ({
+            name: r.title,
+            unitsSold: Number(r.unitsSold),
+        }));
+
+        return {
+            signupsPerDay,
+            ordersPerDay,
+            revenuePerDay,
+            dayLabels,
+            suppliersVerified,
+            suppliersPending,
+            topProducts,
+        };
     }
 }

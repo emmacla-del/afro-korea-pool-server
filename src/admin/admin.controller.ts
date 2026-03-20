@@ -16,7 +16,14 @@ import { AdminService } from './admin.service';
 export class AdminController {
     constructor(private readonly adminService: AdminService) { }
 
-    // ── Supplier verification ─────────────────────────────────────────────────
+    // ── Analytics ──────────────────────────────────────────────────────────────
+
+    @Get('analytics/overview')
+    getAnalyticsOverview() {
+        return this.adminService.getAnalyticsOverview();
+    }
+
+    // ── Supplier verification ──────────────────────────────────────────────────
 
     @Get('suppliers/pending')
     getPendingSuppliers() {
@@ -33,7 +40,7 @@ export class AdminController {
         return this.adminService.setSupplierVerificationStatus(supplierId, 'REJECTED');
     }
 
-    // ── User blocking ─────────────────────────────────────────────────────────
+    // ── User blocking ──────────────────────────────────────────────────────────
 
     @Get('users')
     getAllUsers() {
@@ -50,7 +57,7 @@ export class AdminController {
         return this.adminService.setUserBlockStatus(userId, false);
     }
 
-    // ── Product management ────────────────────────────────────────────────────
+    // ── Product management ─────────────────────────────────────────────────────
 
     @Get('products')
     getAllProducts() {
