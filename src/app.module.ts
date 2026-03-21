@@ -20,6 +20,7 @@ import { NotBlockedGuard } from './auth/not-blocked.guard';
 import { UserModule } from './user/user.module';
 import { CategoryModule } from './category/category.module';
 import { NotificationsModule } from './notifications/notifications.module'; // 👈 ADD THIS
+import { InteractionModule } from './interaction/interaction.module'; // 👈 ADD THIS
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { NotificationsModule } from './notifications/notifications.module'; // �
     UserModule,
     CategoryModule,
     NotificationsModule, // 👈 ADD THIS
+    InteractionModule, // 👈 ADD THIS
   ],
   controllers: [HealthController],
   providers: [AdminGuard, NotBlockedGuard],

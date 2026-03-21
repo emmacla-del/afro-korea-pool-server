@@ -1,20 +1,30 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PoolStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
+import { PoolStatus, Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { CacheService } from '../common/cache/cache.service';
+import { ProductService } from '../product/product.service';
+import { DealService } from '../deal/deal.service';
 import { v2 as cloudinary } from 'cloudinary';
-
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
 
 @Injectable()
 export class CatalogService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(CatalogService.name);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  constructor(
+    private prisma: PrismaService,
+    private cacheService: CacheService,
+    private productService: ProductService,
+    private dealService: DealService,
+  ) {}
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   private async getSupplierIdForUser(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
@@ -23,37 +33,26 @@ export class CatalogService {
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.role !== 'SUPPLIER' || !user.supplier) {
-      throw new ForbiddenException('Not a supplier');
+      throw new ForbiddenException('User is not registered as a supplier');
     }
     return user.supplier.id;
   }
 
   private generateSku(): string {
-    const prefix = 'SKU';
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const randomPart = Math.random().toString(36).substring(2, 10).toUpperCase();
-    return `${prefix}-${timestamp}-${randomPart}`;
+    return `SKU-${Date.now().toString(36).toUpperCase()}-${Math.random()
+      .toString(36)
+      .substring(2, 9)
+      .toUpperCase()}`;
   }
 
-  // ── Photo lab ─────────────────────────────────────────────────────────────
-  // Every product image is normalised to 800×800px on upload:
-  //   • crop: pad   → full image always visible, no cropping
-  //   • background: white → uniform white padding across all products
-  //   • gravity: center   → product always centered
-  //   • quality: auto:best + fetch_format: auto → crisp, small file, webp/avif
-  //   • effect: sharpen:60 → crisp edges after resize
+  // ── Cloudinary ─────────────────────────────────────────────────────────────
 
-  private async uploadToCloudinary(
-    buffer: Buffer,
-    filename: string,
-    mimetype: string,
-  ): Promise<string> {
+  private async uploadToCloudinary(buffer: Buffer, filename: string): Promise<string> {
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
-          folder: 'products',
-          public_id: `${randomUUID()}-${filename.replace(/\.[^/.]+$/, '')}`,
-          resource_type: 'image',
+          folder: 'afropool/products',
+          public_id: `${randomUUID()}-${filename.split('.')[0]}`,
           transformation: [
             {
               width: 800,
@@ -62,39 +61,27 @@ export class CatalogService {
               background: 'white',
               gravity: 'center',
             },
-            {
-              quality: 'auto:best',
-              fetch_format: 'auto',
-              effect: 'sharpen:60',
-            },
+            { quality: 'auto:best', fetch_format: 'auto', effect: 'sharpen:60' },
           ],
         },
         (error, result) => {
-          if (error || !result) {
-            reject(error ?? new Error('Cloudinary upload failed'));
-          } else {
-            resolve(result.secure_url);
-          }
+          if (error || !result) reject(error || new Error('Upload failed'));
+          else resolve(result.secure_url);
         },
       );
       uploadStream.end(buffer);
     });
   }
 
-  // Injects photo lab transformations into existing Cloudinary URLs.
-  // Handles images uploaded before this change — no re-upload needed.
-  // Cloudinary applies the transformation dynamically on first fetch
-  // and caches the result on their CDN.
   private normaliseImageUrl(url: string): string {
-    if (!url.includes('cloudinary.com')) return url;
-    if (url.includes('/upload/w_800')) return url; // already normalised
+    if (!url || !url.includes('cloudinary.com') || url.includes('/upload/w_800')) return url;
     return url.replace(
       '/upload/',
       '/upload/w_800,h_800,c_pad,b_white,g_center,q_auto:best,f_auto,e_sharpen:60/',
     );
   }
 
-  // ── Product creation with images ──────────────────────────────────────────
+  // ── Write Operations ────────────────────────────────────────────────────────
 
   async createProductWithImages(
     userId: string,
@@ -103,379 +90,118 @@ export class CatalogService {
       description?: string;
       price: number;
       stock: number;
-      currency: string;
+      categoryId?: string;
     },
     files: Array<{ buffer: Buffer; filename: string; mimetype: string }>,
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
-    // Upload all images through the photo lab before the DB transaction
-    const uploadedUrls: string[] = [];
-    for (const file of files) {
-      const url = await this.uploadToCloudinary(file.buffer, file.filename, file.mimetype);
-      uploadedUrls.push(url);
-    }
+    const uploadedUrls = await Promise.all(
+      files.map((file) => this.uploadToCloudinary(file.buffer, file.filename)),
+    );
 
-    return this.prisma.$transaction(async (tx) => {
-      const product = await tx.product.create({
+    const result = await this.prisma.$transaction(async (tx) => {
+      const productId = randomUUID();
+      const roundedPrice = Math.round(data.price);
+
+      return tx.product.create({
         data: {
-          id: randomUUID(),
+          id: productId,
           supplierId,
           title: data.product_name,
-          description: data.description ?? null,
-        },
-      });
-
-      const sku = this.generateSku();
-
-      await tx.productVariant.create({
-        data: {
-          id: randomUUID(),
-          productId: product.id,
-          sku,
-          unitPriceXaf: Math.round(data.price),
-          thresholdQty: data.stock,
-          leadTimeDays: 14,
+          description: data.description,
+          categoryId: data.categoryId,
+          minPrice: roundedPrice,
           isActive: true,
+          variants: {
+            create: {
+              id: randomUUID(),
+              sku: this.generateSku(),
+              unitPriceXaf: roundedPrice,
+              thresholdQty: data.stock,
+              leadTimeDays: 14,
+              isActive: true,
+            },
+          },
+          images: {
+            create: uploadedUrls.map((url, index) => ({
+              id: randomUUID(),
+              url,
+              order: index,
+            })),
+          },
+          stats: {
+            create: { score: 0, views: 0, likes: 0, shares: 0 },
+          },
         },
+        include: { variants: true, images: true, stats: true },
       });
-
-      if (uploadedUrls.length > 0) {
-        await tx.image.createMany({
-          data: uploadedUrls.map((url, index) => ({
-            id: randomUUID(),
-            productId: product.id,
-            url,
-            order: index,
-          })),
-        });
-      }
-
-      return product;
     });
+
+    await this.cacheService.delPatterns('products:*', 'home:feed:*', 'home:categories');
+    return result;
   }
 
-  // ── findOne ───────────────────────────────────────────────────────────────
-
-  async findOne(productId: string) {
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId, isActive: true },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            displayName: true,
-            country: true,
-            verificationStatus: true,
-          },
-        },
-      },
-    });
-    if (!product) throw new NotFoundException('Product not found');
-
-    const variants = await this.prisma.productVariant.findMany({
-      where: { productId, isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const images = await this.prisma.image.findMany({
-      where: { productId },
-      orderBy: { order: 'asc' },
-    });
-
-    const variantIds = variants.map(v => v.id);
-    const pools = variantIds.length === 0 ? [] : await this.prisma.pool.findMany({
-      where: {
-        variantId: { in: variantIds },
-        status: {
-          in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
-        },
-      },
-      distinct: ['variantId'],
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const poolByVariantId = new Map<string, any>();
-    for (const p of pools) {
-      if (p.variantId) {
-        poolByVariantId.set(p.variantId, {
-          id: p.id,
-          dealType: p.dealType,
-          teamPrice: p.teamPrice,
-          minBuyers: p.minBuyers,
-          currentBuyers: p.currentBuyers,
-          status: p.status,
-          committedQty: p.committedQty,
-          thresholdQtySnapshot: p.thresholdQtySnapshot,
-          deadlineAt: p.deadlineAt,
-          paymentWindowEndsAt: p.paymentWindowEndsAt,
-        });
-      }
-    }
-
-    return {
-      ...product,
-      variants: variants.map(v => ({
-        ...v,
-        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
-      })),
-      images: images.map(img => this.normaliseImageUrl(img.url)),
-    };
-  }
-
-  // ── listPublicProducts ────────────────────────────────────────────────────
-
-  async listPublicProducts() {
-    const products = await this.prisma.product.findMany({
-      where: {
-        isActive: true,
-        supplier: {
-          owner: {
-            role: 'SUPPLIER',
-          },
-        },
-      },
-      include: {
-        supplier: {
-          select: {
-            id: true,
-            displayName: true,
-            country: true,
-            verificationStatus: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-
-    if (products.length === 0) return [];
-
-    const productIds = products.map((p) => p.id);
-
-    const variants = await this.prisma.productVariant.findMany({
-      where: { productId: { in: productIds }, isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const images = await this.prisma.image.findMany({
-      where: { productId: { in: productIds } },
-      orderBy: { order: 'asc' },
-    });
-
-    const variantsByProductId = new Map<string, any[]>();
-    for (const v of variants) {
-      const list = variantsByProductId.get(v.productId) ?? [];
-      list.push(v);
-      variantsByProductId.set(v.productId, list);
-    }
-
-    const imagesByProductId = new Map<string, any[]>();
-    for (const img of images) {
-      const list = imagesByProductId.get(img.productId) ?? [];
-      list.push(img);
-      imagesByProductId.set(img.productId, list);
-    }
-
-    const variantIds = variants.map((v) => v.id);
-    const pools =
-      variantIds.length === 0
-        ? []
-        : await this.prisma.pool.findMany({
-          where: {
-            variantId: { in: variantIds },
-            status: {
-              in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
-            },
-          },
-          distinct: ['variantId'],
-          orderBy: { createdAt: 'desc' },
-        });
-
-    const poolByVariantId = new Map<string, any>();
-    for (const p of pools) {
-      if (p.variantId) {
-        poolByVariantId.set(p.variantId, {
-          id: p.id,
-          dealType: p.dealType,
-          teamPrice: p.teamPrice,
-          minBuyers: p.minBuyers,
-          currentBuyers: p.currentBuyers,
-          status: p.status,
-          committedQty: p.committedQty,
-          thresholdQtySnapshot: p.thresholdQtySnapshot,
-          deadlineAt: p.deadlineAt,
-          paymentWindowEndsAt: p.paymentWindowEndsAt,
-        });
-      }
-    }
-
-    return products.map((p) => {
-      const vars = variantsByProductId.get(p.id) ?? [];
-      return {
-        id: p.id,
-        supplierId: p.supplierId,
-        title: p.title,
-        description: p.description,
-        category: p.category,
-        isActive: p.isActive,
-        createdAt: p.createdAt,
-        updatedAt: p.updatedAt,
-        supplier: {
-          id: p.supplier.id,
-          displayName: p.supplier.displayName,
-          country: p.supplier.country,
-          verificationStatus: p.supplier.verificationStatus,
-        },
-        variants: vars.map((v) => ({
-          ...v,
-          pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
-        })),
-        images: (imagesByProductId.get(p.id) ?? []).map(
-          (img) => this.normaliseImageUrl(img.url),
-        ),
-      };
-    });
-  }
-
-  // ── listSupplierProducts ──────────────────────────────────────────────────
-
-  async listSupplierProducts(userId: string) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-    return this.fetchSupplierProductsWithVariants(supplierId);
-  }
-
-  private async fetchSupplierProductsWithVariants(supplierId: string) {
-    const products = await this.prisma.product.findMany({
-      where: { supplierId },
-      orderBy: { createdAt: 'desc' },
-      take: 200,
-    });
-    if (products.length === 0) return [];
-
-    const productIds = products.map((p) => p.id);
-
-    const variants = await this.prisma.productVariant.findMany({
-      where: { productId: { in: productIds } },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    const images = await this.prisma.image.findMany({
-      where: { productId: { in: productIds } },
-      orderBy: { order: 'asc' },
-    });
-
-    const variantsByProductId = new Map<string, any[]>();
-    for (const v of variants) {
-      const list = variantsByProductId.get(v.productId) ?? [];
-      list.push(v);
-      variantsByProductId.set(v.productId, list);
-    }
-
-    const imagesByProductId = new Map<string, any[]>();
-    for (const img of images) {
-      const list = imagesByProductId.get(img.productId) ?? [];
-      list.push(img);
-      imagesByProductId.set(img.productId, list);
-    }
-
-    const variantIds = variants.map((v) => v.id);
-    const pools =
-      variantIds.length === 0
-        ? []
-        : await this.prisma.pool.findMany({
-          where: {
-            variantId: { in: variantIds },
-            status: {
-              in: ['OPEN', 'PAYMENT_WINDOW', 'EXPIRED', 'FAILED_PAYMENT', 'PURCHASED'],
-            },
-          },
-          distinct: ['variantId'],
-          orderBy: { createdAt: 'desc' },
-        });
-
-    const poolByVariantId = new Map<string, any>();
-    for (const p of pools) {
-      if (p.variantId) {
-        poolByVariantId.set(p.variantId, {
-          id: p.id,
-          dealType: p.dealType,
-          teamPrice: p.teamPrice,
-          minBuyers: p.minBuyers,
-          currentBuyers: p.currentBuyers,
-          status: p.status,
-          committedQty: p.committedQty,
-          thresholdQtySnapshot: p.thresholdQtySnapshot,
-          deadlineAt: p.deadlineAt,
-          paymentWindowEndsAt: p.paymentWindowEndsAt,
-        });
-      }
-    }
-
-    return products.map((p) => ({
-      ...p,
-      variants: (variantsByProductId.get(p.id) ?? []).map((v) => ({
-        ...v,
-        pools: poolByVariantId.has(v.id) ? [poolByVariantId.get(v.id)] : [],
-      })),
-      images: (imagesByProductId.get(p.id) ?? []).map(
-        (img) => this.normaliseImageUrl(img.url),
-      ),
-    }));
-  }
-
-  // ── getSupplierProductsSummary ────────────────────────────────────────────
-
-  async getSupplierProductsSummary(userId: string) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-
-    const [total, openPool] = await this.prisma.$transaction([
-      this.prisma.product.count({ where: { supplierId } }),
-      this.prisma.pool.count({
-        where: {
-          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
-          variant: { product: { supplierId } },
-        },
-      }),
-    ]);
-
-    return { total, openPool };
-  }
-
-  // ── getLatestCatalogImport ────────────────────────────────────────────────
-
-  async getLatestCatalogImport(userId: string) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-
-    const latest = await this.prisma.product.findFirst({
-      where: { supplierId },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-
-    return { lastImportedAt: latest?.createdAt ?? null };
-  }
-
-  // ── createProduct ─────────────────────────────────────────────────────────
-
-  async createProduct(
+  async updateSupplierProduct(
     userId: string,
-    input: { product_name: string; description?: string; category?: string },
+    productId: string,
+    input: {
+      name?: string;
+      price?: number;
+      stock?: number;
+      isActive?: boolean;
+      categoryId?: string;
+    },
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
-    return this.prisma.product.create({
-      data: {
-        id: randomUUID(),
-        supplierId,
-        title: input.product_name,
-        description: input.description ?? null,
-        category: input.category ?? null,
-        isActive: true,
-      },
-    });
-  }
 
-  // ── createVariant ─────────────────────────────────────────────────────────
+    // Check ownership first
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, supplierId },
+    });
+    if (!product) throw new ForbiddenException('Product not found or access denied');
+
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Update core product fields
+      if (input.name !== undefined || input.isActive !== undefined || input.categoryId !== undefined) {
+        await tx.product.update({
+          where: { id: productId },
+          data: {
+            title: input.name,
+            isActive: input.isActive,
+            categoryId: input.categoryId,
+          },
+        });
+      }
+
+      // 2. Update variant and sync minPrice
+      if (input.price !== undefined || input.stock !== undefined) {
+        const variant = await tx.productVariant.findFirst({
+          where: { productId },
+          orderBy: { createdAt: 'desc' },
+        });
+
+        if (variant) {
+          const newPrice = input.price ? Math.round(input.price) : variant.unitPriceXaf;
+          await tx.productVariant.update({
+            where: { id: variant.id },
+            data: {
+              unitPriceXaf: newPrice,
+              thresholdQty: input.stock ?? undefined,
+            },
+          });
+
+          await tx.product.update({
+            where: { id: productId },
+            data: { minPrice: newPrice },
+          });
+        }
+      }
+    });
+
+    await this.cacheService.delPatterns(`product:${productId}`, 'products:*', 'home:feed:*');
+    return { success: true };
+  }
 
   async createVariant(
     userId: string,
@@ -488,6 +214,7 @@ export class CatalogService {
     },
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
+
     const product = await this.prisma.product.findUnique({
       where: { id: input.productId },
     });
@@ -497,7 +224,7 @@ export class CatalogService {
     const sku = input.sku ?? this.generateSku();
 
     try {
-      return await this.prisma.productVariant.create({
+      const variant = await this.prisma.productVariant.create({
         data: {
           id: randomUUID(),
           productId: input.productId,
@@ -508,155 +235,19 @@ export class CatalogService {
           isActive: true,
         },
       });
-    } catch (err: any) {
-      if (err?.code === 'P2002') {
-        throw new BadRequestException('SKU collision occurred; please try again');
+
+      // Recalculate minPrice across all active variants
+      await this.productService.updateMinPrice(input.productId);
+
+      await this.cacheService.delPatterns(`product:${input.productId}`, 'products:*', 'home:feed:*');
+      return variant;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new BadRequestException('SKU already exists');
       }
       throw err;
     }
   }
-
-  // ── updateSupplierProduct ─────────────────────────────────────────────────
-
-  async updateSupplierProduct(
-    userId: string,
-    productId: string,
-    input: { name?: string; price?: number; stock?: number; isActive?: boolean },
-  ) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { id: true, supplierId: true },
-    });
-    if (!product) throw new NotFoundException('Product not found');
-    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
-
-    if (input.name !== undefined || input.isActive !== undefined) {
-      const data: { title?: string; isActive?: boolean } = {};
-      if (input.name !== undefined) data.title = input.name;
-      if (input.isActive !== undefined) data.isActive = input.isActive;
-      await this.prisma.product.update({ where: { id: productId }, data });
-    }
-
-    if (input.price !== undefined || input.stock !== undefined) {
-      const targetVariant = await this.prisma.productVariant.findFirst({
-        where: { productId },
-        orderBy: { createdAt: 'desc' },
-        select: { id: true },
-      });
-      if (!targetVariant) {
-        throw new BadRequestException('No variant found for this product');
-      }
-      const data: { unitPriceXaf?: number; thresholdQty?: number } = {};
-      if (input.price !== undefined) data.unitPriceXaf = Math.round(input.price);
-      if (input.stock !== undefined) data.thresholdQty = input.stock;
-      await this.prisma.productVariant.update({ where: { id: targetVariant.id }, data });
-    }
-
-    return this.getSupplierProductById(supplierId, productId);
-  }
-
-  // ── updateSupplierProductPoolStatus ──────────────────────────────────────
-
-  async updateSupplierProductPoolStatus(
-    userId: string,
-    productId: string,
-    poolStatus: 'OPEN' | 'CLOSED',
-  ) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { id: true, supplierId: true },
-    });
-    if (!product) throw new NotFoundException('Product not found');
-    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
-
-    const variant = await this.prisma.productVariant.findFirst({
-      where: { productId },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (!variant) throw new BadRequestException('No variant found for this product');
-
-    if (poolStatus === 'CLOSED') {
-      await this.prisma.pool.updateMany({
-        where: {
-          variantId: variant.id,
-          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
-        },
-        data: { status: PoolStatus.EXPIRED },
-      });
-    } else {
-      const existingOpenPool = await this.prisma.pool.findFirst({
-        where: {
-          variantId: variant.id,
-          status: { in: [PoolStatus.OPEN, PoolStatus.PAYMENT_WINDOW] },
-        },
-      });
-
-      if (!existingOpenPool) {
-        const now = new Date();
-        const deadlineAt = new Date(now.getTime() + 72 * 60 * 60 * 1000);
-        await this.prisma.pool.create({
-          data: {
-            id: randomUUID(),
-            variantId: variant.id,
-            status: PoolStatus.OPEN,
-            thresholdQtySnapshot: variant.thresholdQty,
-            unitPriceXafSnapshot: variant.unitPriceXaf,
-            deadlineAt,
-          },
-        });
-      }
-    }
-
-    return this.getSupplierProductById(supplierId, productId);
-  }
-
-  private async getSupplierProductById(supplierId: string, productId: string) {
-    const products = await this.fetchSupplierProductsWithVariants(supplierId);
-    const product = products.find((p) => p.id === productId);
-    if (!product) throw new NotFoundException('Product not found');
-    return product;
-  }
-
-  // ── deleteProduct ─────────────────────────────────────────────────────────
-
-  async deleteProduct(userId: string, productId: string) {
-    const supplierId = await this.getSupplierIdForUser(userId);
-    const product = await this.prisma.product.findUnique({
-      where: { id: productId },
-      select: { supplierId: true },
-    });
-    if (!product) throw new NotFoundException('Product not found');
-    if (product.supplierId !== supplierId) throw new ForbiddenException('Not your product');
-
-    await this.prisma.$transaction(async (tx) => {
-      const variants = await tx.productVariant.findMany({
-        where: { productId },
-        select: { id: true },
-      });
-      const variantIds = variants.map((v) => v.id);
-
-      if (variantIds.length > 0) {
-        await tx.pool.updateMany({
-          where: { variantId: { in: variantIds } },
-          data: { variantId: null },
-        });
-        await tx.order.updateMany({
-          where: { variantId: { in: variantIds } },
-          data: { variantId: null },
-        });
-        await tx.productVariant.deleteMany({ where: { productId } });
-      }
-
-      await tx.image.deleteMany({ where: { productId } });
-      await tx.product.delete({ where: { id: productId } });
-    });
-
-    return { success: true };
-  }
-
-  // ── importCatalog ─────────────────────────────────────────────────────────
 
   async importCatalog(
     userId: string,
@@ -664,7 +255,7 @@ export class CatalogService {
       products: Array<{
         product_name: string;
         description?: string;
-        category?: string;
+        categoryId?: string;
         variants: Array<{
           sku?: string;
           unitPriceXaf: number;
@@ -675,13 +266,16 @@ export class CatalogService {
     },
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
-
     const results: Array<{ productId: string; createdVariants: number }> = [];
     const errors: Array<{ productTitle: string; error: string }> = [];
 
     for (const productInput of input.products) {
       try {
         const created = await this.prisma.$transaction(async (tx) => {
+          if (productInput.variants.length === 0) {
+            throw new BadRequestException('Product must have at least one variant');
+          }
+
           const productId = randomUUID();
           const product = await tx.product.create({
             data: {
@@ -689,56 +283,191 @@ export class CatalogService {
               supplierId,
               title: productInput.product_name,
               description: productInput.description ?? null,
-              category: productInput.category ?? null,
+              categoryId: productInput.categoryId,
               isActive: true,
             },
           });
 
-          if (productInput.variants.length === 0) {
-            throw new BadRequestException('Product must have at least one variant');
-          }
+          const variantData = productInput.variants.map((v) => ({
+            id: randomUUID(),
+            productId: product.id,
+            sku: v.sku ?? this.generateSku(),
+            unitPriceXaf: v.unitPriceXaf,
+            thresholdQty: v.thresholdQty,
+            leadTimeDays: v.leadTimeDays ?? 14,
+            isActive: true,
+          }));
 
-          await tx.productVariant.createMany({
-            data: productInput.variants.map((v) => ({
-              id: randomUUID(),
-              productId: product.id,
-              sku: v.sku ?? this.generateSku(),
-              unitPriceXaf: v.unitPriceXaf,
-              thresholdQty: v.thresholdQty,
-              leadTimeDays: v.leadTimeDays ?? 14,
-              isActive: true,
-            })),
+          await tx.productVariant.createMany({ data: variantData });
+
+          const minPrice = Math.min(...variantData.map((v) => v.unitPriceXaf));
+          await tx.product.update({
+            where: { id: product.id },
+            data: { minPrice },
           });
 
-          return { id: productId };
+          await tx.productStats.create({
+            data: { productId: product.id, score: 0, views: 0, likes: 0, shares: 0 },
+          });
+
+          return { id: product.id };
         });
 
         results.push({
           productId: created.id,
           createdVariants: productInput.variants.length,
         });
-      } catch (err: any) {
-        const message =
-          typeof err?.message === 'string' ? err.message : 'Unknown error';
-        if (
-          err?.code === 'P2002' ||
-          (message.toLowerCase().includes('unique') &&
-            message.toLowerCase().includes('sku'))
-        ) {
-          errors.push({
-            productTitle: productInput.product_name,
-            error: 'SKU must be globally unique; one of the variant SKUs already exists.',
-          });
-        } else {
-          errors.push({ productTitle: productInput.product_name, error: message });
-        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        const isSkuCollision = err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+
+        errors.push({
+          productTitle: productInput.product_name,
+          error: isSkuCollision ? 'SKU must be globally unique.' : message,
+        });
       }
     }
 
-    if (results.length === 0) {
-      throw new BadRequestException({ message: 'No products imported', errors });
+    if (results.length === 0) throw new BadRequestException({ message: 'No products imported', errors });
+
+    await this.cacheService.delPatterns('products:*', 'home:feed:*', 'home:categories');
+    return { imported: results, errors };
+  }
+
+  // ── Read Operations ─────────────────────────────────────────────────────────
+
+  async findOne(productId: string, userId?: string) {
+    const product = await this.productService.getProductById(productId, userId);
+
+    const variantIds = (product.variants ?? []).map((variant) => variant.id);
+    const pools = await this.dealService.getPoolsForVariants(variantIds);
+    this.dealService.attachPoolsToVariants(product.variants ?? [], pools);
+
+    return {
+      ...product,
+      images: (product.images ?? []).map((image) => this.normaliseImageUrl(image.url)),
+      variants: product.variants ?? [],
+    };
+  }
+
+  async listSupplierProducts(userId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    const products = await this.prisma.product.findMany({
+      where: { supplierId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        images: { orderBy: { order: 'asc' } },
+        category_: true, // Corrected from 'category'
+        variants: {
+          include: {
+            pools: {
+              where: { status: { in: ['OPEN', 'PAYMENT_WINDOW'] } },
+            },
+          },
+        },
+      },
+    });
+
+    return products.map((p) => ({
+      ...p,
+      images: p.images.map((img) => this.normaliseImageUrl(img.url)),
+    }));
+  }
+
+  async listPublicProducts() {
+    // Public product listing for customers
+    return this.productService.getProducts({ skip: 0, take: 50, useCache: true });
+  }
+
+  async getSupplierProductsSummary(userId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    const [activeCount, totalCount] = await Promise.all([
+      this.prisma.product.count({ where: { supplierId, isActive: true } }),
+      this.prisma.product.count({ where: { supplierId } }),
+    ]);
+
+    return {
+      supplierId,
+      activeProducts: activeCount,
+      totalProducts: totalCount,
+    };
+  }
+
+  async getLatestCatalogImport(userId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    // If no dedicated catalog import history table exists, reuse latest product record.
+    const latest = await this.prisma.product.findFirst({
+      where: { supplierId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, title: true, createdAt: true },
+    });
+
+    return latest;
+  }
+
+  async updateSupplierProductPoolStatus(userId: string, productId: string, status: 'OPEN' | 'CLOSED') {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, supplierId },
+      include: { variants: true },
+    });
+    if (!product) throw new ForbiddenException('Product not found or access denied');
+
+    // Set product active state and close pool if needed.
+    const isActive = status === 'OPEN';
+    await this.prisma.product.update({
+      where: { id: productId },
+      data: { isActive },
+    });
+
+    if (status === 'CLOSED' && product.variants.length > 0) {
+      for (const variant of product.variants) {
+        await this.dealService.closePoolsForVariant(variant.id);
+      }
     }
 
-    return { imported: results, errors };
+    await this.cacheService.delPatterns(`product:${productId}`, 'products:*', 'home:feed:*');
+    return { success: true };
+  }
+
+  async deleteProduct(userId: string, productId: string) {
+    const supplierId = await this.getSupplierIdForUser(userId);
+
+    await this.prisma.$transaction(async (tx) => {
+      const product = await tx.product.findFirst({
+        where: { id: productId, supplierId },
+      });
+      if (!product) throw new ForbiddenException('Access denied');
+
+      await tx.image.deleteMany({ where: { productId } });
+
+      const variants = await tx.productVariant.findMany({
+        where: { productId },
+        select: { id: true },
+      });
+      const vIds = variants.map((v) => v.id);
+
+      // Decouple relations
+      await tx.pool.updateMany({
+        where: { variantId: { in: vIds } },
+        data: { variantId: null },
+      });
+      await tx.order.updateMany({
+        where: { variantId: { in: vIds } },
+        data: { variantId: null },
+      });
+
+      await tx.productStats.deleteMany({ where: { productId } });
+      await tx.productVariant.deleteMany({ where: { productId } });
+      await tx.product.delete({ where: { id: productId } });
+    });
+
+    await this.cacheService.delPatterns(`product:${productId}`, 'products:*', 'home:feed:*');
+    return { success: true };
   }
 }

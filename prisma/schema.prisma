@@ -74,13 +74,21 @@ enum DeliveryType {
   SATELLITE_HUB
 }
 
+// ── NEW: InteractionType used by InteractionService / ProductService ──────────
+enum InteractionType {
+  VIEW
+  LIKE
+  SHARE
+}
+
 // ==================== CATEGORIES ====================
 
 model Category {
   id        String   @id @default(uuid())
-  name      String                         // "Food & Produce"
-  emoji     String                         // "🥦"
-  slug      String   @unique               // "FOOD_PRODUCE"
+  name      String
+  emoji     String
+  slug      String   @unique
+  imageUrl  String?                        // 🔥 Added: used by getTopCategories() in HomeService
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -117,8 +125,9 @@ model Neighbourhood {
   divisionId String
   division   Division @relation(fields: [divisionId], references: [id])
 
-  users User[]
-  pools Pool[]
+  users     User[]
+  pools     Pool[]
+  suppliers Supplier[] @relation("SupplierNeighbourhood") // 🔥 Added: suppliers filter by neighbourhood
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -163,10 +172,12 @@ model User {
   referrerTransactions ReferralTransaction[] @relation("ReferrerLinks")
   refereeTransactions  ReferralTransaction[] @relation("RefereeLinks")
 
-  // 👇 NEW NOTIFICATION FIELDS
   pushTokens     PushToken[]         @relation("UserPushTokens")
   notifications  InAppNotification[] @relation("UserNotifications")
   whatsappOptOut Boolean             @default(false)
+
+  // 🔥 Added: required by InteractionService / ProductService personalisation
+  interactions UserProductInteraction[]
 }
 
 model Supplier {
@@ -175,10 +186,15 @@ model Supplier {
   displayName        String
   country            String
   city               String?
+  description        String?                        // 🔥 Added: returned by getProductById supplier select
   verificationStatus VerificationStatus @default(UNVERIFIED)
   businessRegNumber  String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
+
+  // 🔥 Added: supplier neighbourhood (used in ProductService neighbourhoodId filter)
+  neighbourhoodId String?
+  neighbourhood   Neighbourhood? @relation("SupplierNeighbourhood", fields: [neighbourhoodId], references: [id])
 
   owner          User            @relation(fields: [ownerUserId], references: [id])
   products       Product[]       @relation("SupplierProducts")
@@ -186,6 +202,7 @@ model Supplier {
   orders         Order[]         @relation("SupplierOrders")
 
   @@index([verificationStatus])
+  @@index([neighbourhoodId])    // 🔥 Added: speeds up neighbourhood-based product filtering
 }
 
 // ==================== PRODUCT & INVENTORY ====================
@@ -196,15 +213,28 @@ model Product {
   title       String
   description String?
   category    String?  // legacy free-text label — kept for backwards compat
-  categoryId  String?  // 👈 foreign key to Category table
+  categoryId  String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  supplier    Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
-  category_   Category?        @relation(fields: [categoryId], references: [id]) // 👈 new relation
-  variants    ProductVariant[] @relation("ProductVariants")
-  images      Image[]          @relation("ProductImages")
+  // 🔥 Added: used by ProductService price sort and updateMinPrice()
+  minPrice    Int?
+
+  supplier   Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
+  category_  Category?        @relation(fields: [categoryId], references: [id])
+  variants   ProductVariant[] @relation("ProductVariants")
+  images     Image[]          @relation("ProductImages")
+
+  // 🔥 Added: used by ProductService popularity/trending sort and admin analytics
+  stats        ProductStats?
+  pools        Pool[]                   @relation("ProductPools")
+  interactions UserProductInteraction[]
+
+  @@index([supplierId])
+  @@index([categoryId])
+  @@index([isActive, createdAt])
+  @@index([minPrice])            // 🔥 Added: price sort index
 }
 
 model ProductVariant {
@@ -221,6 +251,8 @@ model ProductVariant {
   product Product         @relation("ProductVariants", fields: [productId], references: [id])
   pools   Pool[]          @relation("VariantPools")
   orders  Order[]         @relation("VariantOrders")
+
+  @@index([productId])
 }
 
 model Image {
@@ -234,6 +266,38 @@ model Image {
   product Product @relation("ProductImages", fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
+}
+
+// 🔥 NEW: Product popularity & trending score — used by ProductService sort
+model ProductStats {
+  id        String  @id @default(uuid())
+  productId String  @unique
+  score     Float   @default(0)   // weighted engagement score
+  views     Int     @default(0)
+  likes     Int     @default(0)
+  shares    Int     @default(0)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([score])
+}
+
+// 🔥 NEW: Individual interaction events — used by InteractionService and
+//         ProductService collaborative filtering for personalised recommendations
+model UserProductInteraction {
+  id        String          @id @default(uuid())
+  userId    String
+  productId String
+  type      InteractionType
+  createdAt DateTime        @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([productId])
+  @@index([userId, productId])   // 🔥 speeds up "products this user has seen"
+  @@index([productId, userId])   // 🔥 speeds up "users who saw this product"
 }
 
 // ==================== AGGREGATION & POOLS ====================
@@ -267,12 +331,17 @@ model Pool {
   hubContactPhone String?
   hubName         String?
 
+  // 🔥 Added: direct Product relation (used in ProductService pool include + admin analytics)
+  productId String?
+  product   Product? @relation("ProductPools", fields: [productId], references: [id])
+
   variant       ProductVariant?  @relation("VariantPools", fields: [variantId], references: [id])
   commitments   Commitment[]     @relation("PoolCommitments")
   purchaseOrder PurchaseOrder?
   orders        Order[]          @relation("PoolOrders")
 
   @@index([variantId])
+  @@index([productId])           // 🔥 Added
   @@index([status, deadlineAt])
   @@index([status, paymentWindowEndsAt])
 }
@@ -331,6 +400,8 @@ model Order {
   @@index([userId, createdAt])
   @@index([supplierId, createdAt])
   @@index([poolId])
+  @@index([status])              // 🔥 Added: used by admin order status filter
+  @@index([createdAt])           // 🔥 Added: used by admin date range filter
 }
 
 model Payment {
@@ -440,7 +511,7 @@ model RewardTransaction {
   @@index([type])
 }
 
-// ==================== NOTIFICATIONS (NEW) ====================
+// ==================== NOTIFICATIONS ====================
 
 model PushToken {
   id        String   @id @default(uuid())
@@ -474,23 +545,24 @@ model InAppNotification {
 }
 
 model NotificationLog {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
   body        String
   deepLink    String?
   audience    String
   channels    String[]
-  status      String   @default("PENDING")
+  status      String    @default("PENDING")   // "PENDING" | "SENT" | "FAILED" | "SCHEDULED"
   scheduledAt DateTime?
   sentAt      DateTime?
-  pushCount   Int      @default(0)
-  inAppCount  Int      @default(0)
-  waCount     Int      @default(0)
-  failCount   Int      @default(0)
+  pushCount   Int       @default(0)
+  inAppCount  Int       @default(0)
+  waCount     Int       @default(0)
+  failCount   Int       @default(0)
+  sentCount   Int       @default(0)            // 🔥 Added: used in notification history UI
   createdBy   String?
   error       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([status])
   @@index([createdAt])

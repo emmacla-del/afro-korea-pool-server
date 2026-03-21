@@ -142,7 +142,7 @@ export class CatalogController {
     }
 
     // ✅ sku removed from destructuring — backend generates it
-    const { product_name, description, price, stock, currency } = parseResult.data;
+    const { product_name, description, price, stock } = parseResult.data;
 
     const created = await this.catalogService.createProductWithImages(
       userId,
@@ -151,7 +151,6 @@ export class CatalogController {
         description,
         price,
         stock,
-        currency: currency || 'XAF',
       },
       files,
     );
