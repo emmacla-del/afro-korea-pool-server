@@ -5,12 +5,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ProductService } from '../product/product.service';
 import { DealService } from '../deal/deal.service';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
-import { CacheModule } from '../common/cache/cache.module'; // 👈 Import your new module
+import { CacheModule } from '../common/cache/cache.module';
+import { InteractionModule } from '../interaction/interaction.module'; // 👈 ADD THIS
 
 @Module({
   imports: [
     CloudinaryModule,
-    CacheModule, // 👈 This brings in BOTH CacheService AND CACHE_MANAGER
+    CacheModule,
+    InteractionModule, // 👈 ADD THIS (Fixes InteractionService at index [2] error)
   ],
   controllers: [CatalogController],
   providers: [
@@ -18,7 +20,6 @@ import { CacheModule } from '../common/cache/cache.module'; // 👈 Import your 
     PrismaService,
     ProductService,
     DealService
-    // ❌ REMOVE CacheService from here; it's now coming from CacheModule
   ],
   exports: [CatalogService]
 })
