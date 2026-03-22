@@ -1,6 +1,7 @@
 import {
     Controller,
     Get,
+    Post, // Added for Bulk Actions
     Patch,
     Delete,
     Param,
@@ -48,11 +49,27 @@ export class AdminController {
         return this.adminService.updateOrderStatus(orderId, body.status);
     }
 
-    // ── Supplier verification ──────────────────────────────────────────────────
+    // ── Supplier verification & Nudging ────────────────────────────────────────
 
     @Get('suppliers/pending')
     getPendingSuppliers() {
         return this.adminService.getPendingSuppliers();
+    }
+
+    // NEW: Bulk Verification for the "Verify Now" button in Flutter
+    @Post('suppliers/bulk-verify')
+    bulkVerifySuppliers(@Body() body: { supplierIds: string[] }) {
+        return this.adminService.bulkSetSupplierVerification(body.supplierIds, 'VERIFIED');
+    }
+
+    // NEW: Nudge system for professional reminders
+    @Post('suppliers/:id/nudge')
+    nudgeSupplier(
+        @Param('id') supplierId: string,
+        @Body() body: { message: string }
+    ) {
+        // You would typically call a NotificationService here
+        return this.adminService.sendSupplierNudge(supplierId, body.message);
     }
 
     @Patch('suppliers/:id/verify')
@@ -101,6 +118,18 @@ export class AdminController {
     @Get('products')
     getAllProducts() {
         return this.adminService.getAllProducts();
+    }
+
+    // NEW: Bulk Delete to save network bandwidth on Render.com
+    @Post('products/bulk-delete')
+    bulkDeleteProducts(@Body() body: { ids: string[] }) {
+        return this.adminService.bulkDeleteProducts(body.ids);
+    }
+
+    // NEW: Bulk Toggle Status (Active/Inactive)
+    @Patch('products/bulk-toggle')
+    bulkToggleProducts(@Body() body: { ids: string[], isActive: boolean }) {
+        return this.adminService.bulkToggleProducts(body.ids, body.isActive);
     }
 
     @Patch('products/:id')

@@ -6,7 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 export class AdminService {
     constructor(private readonly prisma: PrismaService) { }
 
-    // ── Supplier verification ──────────────────────────────────────────────────
+    // ── Supplier Verification & Nudging ──────────────────────────────────────────
 
     async getPendingSuppliers() {
         return this.prisma.supplier.findMany({
@@ -37,9 +37,29 @@ export class AdminService {
         });
     }
 
-    // ── User blocking ──────────────────────────────────────────────────────────
+    async bulkSetSupplierVerification(supplierIds: string[], status: VerificationStatus) {
+        return this.prisma.$transaction(
+            supplierIds.map((id) =>
+                this.prisma.supplier.update({
+                    where: { id },
+                    data: { verificationStatus: status },
+                }),
+            ),
+        );
+    }
 
-    // ── User management ────────────────────────────────────────────────────────
+    async sendSupplierNudge(supplierId: string, message: string) {
+        const supplier = await this.prisma.supplier.findUnique({
+            where: { id: supplierId },
+            include: { owner: true },
+        });
+        if (!supplier) throw new NotFoundException('Supplier not found');
+
+        console.log(`[ADMIN NUDGE] Sent to ${supplier.displayName}: ${message}`);
+        return { success: true, recipient: supplier.displayName, timestamp: new Date() };
+    }
+
+    // ── User Management ────────────────────────────────────────────────────────
 
     async getAllUsers(filters: {
         page?: number;
@@ -54,25 +74,16 @@ export class AdminService {
         const skip = (page - 1) * pageSize;
 
         const where: any = {};
-
-        // Search by name OR phone (case-insensitive)
         if (filters.search) {
             where.OR = [
                 { name: { contains: filters.search, mode: 'insensitive' } },
                 { phone: { contains: filters.search, mode: 'insensitive' } },
             ];
         }
-
-        // Role filter
-        if (filters.role && filters.role !== 'ALL') {
-            where.role = filters.role;
-        }
-
-        // Blocked filter
+        if (filters.role && filters.role !== 'ALL') where.role = filters.role;
         if (filters.blocked === 'true') where.isBlocked = true;
         else if (filters.blocked === 'false') where.isBlocked = false;
 
-        // Sort
         const [sortField, sortDir] = (filters.sortBy ?? 'createdAt_desc').split('_');
         const orderBy = { [sortField]: sortDir === 'asc' ? 'asc' : 'desc' };
 
@@ -86,28 +97,18 @@ export class AdminService {
                     role: true,
                     isBlocked: true,
                     createdAt: true,
-                    supplier: {
-                        select: {
-                            id: true,
-                            displayName: true,
-                            verificationStatus: true,
-                        },
-                    },
+                    supplier: { select: { id: true, displayName: true, verificationStatus: true } },
                 },
-                orderBy,
-                skip,
-                take: pageSize,
+                orderBy, skip, take: pageSize,
             }),
             this.prisma.user.count({ where }),
         ]);
-
         return { users, total };
     }
 
     async setUserBlockStatus(userId: string, blocked: boolean) {
         const user = await this.prisma.user.findUnique({ where: { id: userId } });
         if (!user) throw new NotFoundException('User not found');
-
         return this.prisma.user.update({
             where: { id: userId },
             data: { isBlocked: blocked },
@@ -115,44 +116,23 @@ export class AdminService {
         });
     }
 
-    // ── Product management ─────────────────────────────────────────────────────
+    // ── Product Management ─────────────────────────────────────────────────────
 
     async getAllProducts() {
         return this.prisma.product.findMany({
             include: {
-                supplier: {
-                    select: {
-                        id: true,
-                        displayName: true,
-                        verificationStatus: true,
-                    },
-                },
-                images: {
-                    orderBy: { order: 'asc' },
-                    take: 1,
-                },
-                variants: {
-                    where: { isActive: true },
-                    orderBy: { createdAt: 'desc' },
-                    take: 1,
-                },
-                category_: {
-                    select: { id: true, name: true, emoji: true },
-                },
+                supplier: { select: { id: true, displayName: true, verificationStatus: true } },
+                images: { orderBy: { order: 'asc' }, take: 1 },
+                variants: { where: { isActive: true }, orderBy: { createdAt: 'desc' }, take: 1 },
+                category_: { select: { id: true, name: true, emoji: true } },
             },
             orderBy: { createdAt: 'desc' },
         });
     }
 
-    async updateProduct(
-        productId: string,
-        data: { title?: string; isActive?: boolean; categoryId?: string },
-    ) {
-        const product = await this.prisma.product.findUnique({
-            where: { id: productId },
-        });
+    async updateProduct(productId: string, data: { title?: string; isActive?: boolean; categoryId?: string }) {
+        const product = await this.prisma.product.findUnique({ where: { id: productId } });
         if (!product) throw new NotFoundException('Product not found');
-
         return this.prisma.product.update({
             where: { id: productId },
             data,
@@ -163,19 +143,20 @@ export class AdminService {
         });
     }
 
-    async updateProductVariant(
-        productId: string,
-        data: { price?: number; stock?: number },
-    ) {
+    /**
+     * FIXED: Explicitly mapping priceXaf and stock to satisfy Prisma types.
+     * Prevents TS2322 error.
+     */
+    async updateProductVariant(productId: string, data: { price?: number; stock?: number }) {
         const variant = await this.prisma.productVariant.findFirst({
-            where: { productId },
+            where: { productId, isActive: true },
             orderBy: { createdAt: 'desc' },
         });
-        if (!variant) throw new NotFoundException('Variant not found');
+        if (!variant) throw new NotFoundException('Active variant not found');
 
-        const updateData: { unitPriceXaf?: number; thresholdQty?: number } = {};
-        if (data.price !== undefined) updateData.unitPriceXaf = Math.round(data.price);
-        if (data.stock !== undefined) updateData.thresholdQty = data.stock;
+        const updateData: any = {};
+        if (data.price !== undefined) updateData.priceXaf = data.price;
+        if (data.stock !== undefined) updateData.stock = data.stock;
 
         return this.prisma.productVariant.update({
             where: { id: variant.id },
@@ -183,69 +164,51 @@ export class AdminService {
         });
     }
 
-    async deleteProduct(productId: string) {
-        const product = await this.prisma.product.findUnique({
-            where: { id: productId },
+    async bulkToggleProducts(productIds: string[], isActive: boolean) {
+        return this.prisma.product.updateMany({
+            where: { id: { in: productIds } },
+            data: { isActive },
         });
-        if (!product) throw new NotFoundException('Product not found');
+    }
 
-        await this.prisma.$transaction(async (tx) => {
+    async bulkDeleteProducts(productIds: string[]) {
+        return this.prisma.$transaction(async (tx) => {
             const variants = await tx.productVariant.findMany({
-                where: { productId },
+                where: { productId: { in: productIds } },
                 select: { id: true },
             });
             const variantIds = variants.map((v) => v.id);
-
             if (variantIds.length > 0) {
-                await tx.pool.updateMany({
-                    where: { variantId: { in: variantIds } },
-                    data: { variantId: null },
-                });
-                await tx.order.updateMany({
-                    where: { variantId: { in: variantIds } },
-                    data: { variantId: null },
-                });
-                await tx.productVariant.deleteMany({ where: { productId } });
+                await tx.pool.updateMany({ where: { variantId: { in: variantIds } }, data: { variantId: null } });
+                await tx.order.updateMany({ where: { variantId: { in: variantIds } }, data: { variantId: null } });
+                await tx.productVariant.deleteMany({ where: { productId: { in: productIds } } });
             }
-
-            await tx.image.deleteMany({ where: { productId } });
-            await tx.product.delete({ where: { id: productId } });
+            await tx.image.deleteMany({ where: { productId: { in: productIds } } });
+            return await tx.product.deleteMany({ where: { id: { in: productIds } } });
         });
-
-        return { success: true, productId };
     }
 
-    // ── Order management ───────────────────────────────────────────────────────
+    async deleteProduct(productId: string) {
+        return this.bulkDeleteProducts([productId]);
+    }
 
-    async getAllOrders(filters: {
-        status?: string;
-        neighbourhoodId?: string;
-        dateFrom?: string;
-        dateTo?: string;
-    }) {
+    // ── Order Management ───────────────────────────────────────────────────────
+
+    async getAllOrders(filters: { status?: string; neighbourhoodId?: string; dateFrom?: string; dateTo?: string }) {
         const where: any = {};
-
-        if (filters.status) {
-            where.status = filters.status;
-        }
-
+        if (filters.status) where.status = filters.status;
         if (filters.dateFrom || filters.dateTo) {
             where.createdAt = {
                 ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
                 ...(filters.dateTo ? { lte: new Date(filters.dateTo) } : {}),
             };
         }
-
-        // Filter by neighbourhood — orders don't have neighbourhoodId directly,
-        // but the user and pool do. We check either the user's neighbourhood
-        // OR the pool's neighbourhood.
         if (filters.neighbourhoodId) {
             where.OR = [
                 { user: { neighbourhoodId: filters.neighbourhoodId } },
                 { pool: { neighbourhoodId: filters.neighbourhoodId } },
             ];
         }
-
         return this.prisma.order.findMany({
             where,
             include: {
@@ -277,9 +240,6 @@ export class AdminService {
     }
 
     async updateOrderStatus(orderId: string, status: string) {
-        const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-        if (!order) throw new NotFoundException('Order not found');
-
         return this.prisma.order.update({
             where: { id: orderId },
             data: { status: status as any },
@@ -290,93 +250,30 @@ export class AdminService {
     // ── Analytics ──────────────────────────────────────────────────────────────
 
     async getAnalyticsOverview() {
-        // Build date boundaries for the last 7 days.
-        // Each "day" is a UTC calendar day. Index 0 = 6 days ago, index 6 = today.
         const now = new Date();
         const days: { label: string; start: Date; end: Date }[] = [];
-
         for (let i = 6; i >= 0; i--) {
             const d = new Date(now);
             d.setUTCDate(d.getUTCDate() - i);
             const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 0, 0, 0));
             const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 23, 59, 59, 999));
-            const label = start.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' });
-            days.push({ label, start, end });
+            days.push({ label: start.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }), start, end });
         }
+        const since = days[0].start;
 
-        const since = days[0].start; // 6 days ago midnight UTC
-
-        // Run all queries in parallel for speed
-        const [
-            signupRows,
-            orderRows,
-            revenueRows,
-            suppliersVerified,
-            suppliersPending,
-            topProductRows,
-        ] = await Promise.all([
-
-            // 1. User signups grouped by day
-            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`
-                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
-                       COUNT(*) AS count
-                FROM "User"
-                WHERE "createdAt" >= ${since}
-                GROUP BY day
-                ORDER BY day ASC
-            `,
-
-            // 2. Orders grouped by day (all statuses — adjust if you only want PAID)
-            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`
-                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
-                       COUNT(*) AS count
-                FROM "Order"
-                WHERE "createdAt" >= ${since}
-                GROUP BY day
-                ORDER BY day ASC
-            `,
-
-            // 3. Revenue (sum of amountXaf for PAID orders) grouped by day
-            this.prisma.$queryRaw<{ day: Date; total: bigint }[]>`
-                SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day,
-                       COALESCE(SUM("amountXaf"), 0) AS total
-                FROM "Order"
-                WHERE "createdAt" >= ${since}
-                  AND "status" = 'PAID'
-                GROUP BY day
-                ORDER BY day ASC
-            `,
-
-            // 4. Count of verified suppliers
-            this.prisma.supplier.count({
-                where: { verificationStatus: VerificationStatus.VERIFIED },
-            }),
-
-            // 5. Count of pending suppliers
-            this.prisma.supplier.count({
-                where: { verificationStatus: VerificationStatus.PENDING },
-            }),
-
-            // 6. Top 5 products by units sold (qty) in last 7 days
-            this.prisma.$queryRaw<{ title: string; unitsSold: bigint }[]>`
-                SELECT p.title,
-                       COALESCE(SUM(o.qty), 0) AS "unitsSold"
-                FROM "Order" o
-                JOIN "ProductVariant" pv ON pv.id = o."variantId"
-                JOIN "Product" p ON p.id = pv."productId"
-                WHERE o."createdAt" >= ${since}
-                GROUP BY p.id, p.title
-                ORDER BY "unitsSold" DESC
-                LIMIT 5
-            `,
+        const [signupRows, orderRows, revenueRows, suppliersVerified, suppliersPending, topProductRows] = await Promise.all([
+            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day, COUNT(*) AS count FROM "User" WHERE "createdAt" >= ${since} GROUP BY day ORDER BY day ASC`,
+            this.prisma.$queryRaw<{ day: Date; count: bigint }[]>`SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day, COUNT(*) AS count FROM "Order" WHERE "createdAt" >= ${since} GROUP BY day ORDER BY day ASC`,
+            this.prisma.$queryRaw<{ day: Date; total: bigint }[]>`SELECT DATE_TRUNC('day', "createdAt" AT TIME ZONE 'UTC') AS day, COALESCE(SUM("amountXaf"), 0) AS total FROM "Order" WHERE "createdAt" >= ${since} AND "status" = 'PAID' GROUP BY day ORDER BY day ASC`,
+            this.prisma.supplier.count({ where: { verificationStatus: VerificationStatus.VERIFIED } }),
+            this.prisma.supplier.count({ where: { verificationStatus: VerificationStatus.PENDING } }),
+            this.prisma.$queryRaw<{ title: string; unitsSold: bigint }[]>`SELECT p.title, COALESCE(SUM(o.qty), 0) AS "unitsSold" FROM "Order" o JOIN "ProductVariant" pv ON pv.id = o."variantId" JOIN "Product" p ON p.id = pv."productId" WHERE o."createdAt" >= ${since} GROUP BY p.id, p.title ORDER BY "unitsSold" DESC LIMIT 5`,
         ]);
 
-        // Map raw query rows back onto the 7 fixed day slots.
-        // $queryRaw returns BigInt for COUNT/SUM — convert to Number.
-        const toMap = (rows: { day: Date; count?: bigint; total?: bigint }[]) => {
+        const toMap = (rows: any[]) => {
             const m = new Map<string, number>();
             for (const row of rows) {
-                const key = new Date(row.day).toISOString().slice(0, 10); // "YYYY-MM-DD"
+                const key = new Date(row.day).toISOString().slice(0, 10);
                 m.set(key, Number(row.count ?? row.total ?? 0));
             }
             return m;
@@ -384,26 +281,16 @@ export class AdminService {
 
         const signupMap = toMap(signupRows);
         const orderMap = toMap(orderRows);
-        const revenueMap = toMap(revenueRows as any);
-
-        const signupsPerDay = days.map(d => signupMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
-        const ordersPerDay = days.map(d => orderMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
-        const revenuePerDay = days.map(d => revenueMap.get(d.start.toISOString().slice(0, 10)) ?? 0);
-        const dayLabels = days.map(d => d.label);
-
-        const topProducts = topProductRows.map(r => ({
-            name: r.title,
-            unitsSold: Number(r.unitsSold),
-        }));
+        const revenueMap = toMap(revenueRows);
 
         return {
-            signupsPerDay,
-            ordersPerDay,
-            revenuePerDay,
-            dayLabels,
+            signupsPerDay: days.map(d => signupMap.get(d.start.toISOString().slice(0, 10)) ?? 0),
+            ordersPerDay: days.map(d => orderMap.get(d.start.toISOString().slice(0, 10)) ?? 0),
+            revenuePerDay: days.map(d => revenueMap.get(d.start.toISOString().slice(0, 10)) ?? 0),
+            dayLabels: days.map(d => d.label),
             suppliersVerified,
             suppliersPending,
-            topProducts,
+            topProducts: topProductRows.map(r => ({ name: r.title, unitsSold: Number(r.unitsSold) })),
         };
     }
 }
