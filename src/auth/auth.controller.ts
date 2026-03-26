@@ -1,62 +1,54 @@
-import { Body, Controller, Post, BadRequestException } from '@nestjs/common';
-import { UserRole } from '@prisma/client';
-import { z } from 'zod';
+// src/auth/auth.controller.ts
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Request as NestRequest, // Aliased to avoid confusion
+  Get,
+  HttpCode,
+  HttpStatus,
+  ValidationPipe,
+  UsePipes,
+} from '@nestjs/common';
+import { Request } from 'express'; // 👈 Import Request type from express
 import { AuthService } from './auth.service';
+import { JwtAuthGuard } from './jwt-auth.guard';
+import { LocalAuthGuard } from './local-auth.guard';
+import { LoginDto, RegisterDto } from './auth.dto'; // 👈 Removed /dto/
 
-const supplierDataSchema = z.object({
-  displayName: z.string().min(1).max(200),
-  country: z.string().min(1).max(100),
-  city: z.string().optional(),
-  businessRegNumber: z.string().optional(),
-});
-
-const registerSchema = z.object({
-  phone: z.string().trim().min(3).max(50),
-  password: z.string().min(6).max(200),
-  role: z.enum(['CUSTOMER', 'SUPPLIER']).default('CUSTOMER'),
-  name: z.string().optional(),
-  referralCode: z.string().optional(),
-  supplierData: supplierDataSchema.optional(),
-}).refine(
-  (data) => {
-    if (data.role === 'SUPPLIER') {
-      return data.supplierData != null;
-    }
-    return true;
-  },
-  {
-    message: 'Supplier data is required when role is SUPPLIER',
-    path: ['supplierData'],
-  }
-);
-
-const loginSchema = z.object({
-  phone: z.string().trim().min(3).max(50),
-  password: z.string().min(6).max(200),
-});
-
-@Controller('/auth')
+@Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private authService: AuthService) { }
 
-  @Post('/register')
-  async register(@Body() body: unknown) {
-    const parsed = registerSchema.parse(body);
-    const role = parsed.role === 'SUPPLIER' ? UserRole.SUPPLIER : UserRole.CUSTOMER;
-    return this.authService.register(
-      parsed.phone,
-      parsed.password,
-      role,
-      parsed.supplierData,
-      parsed.name,
-      parsed.referralCode,
-    );
+  @Post('register')
+  @HttpCode(HttpStatus.CREATED)
+  @UsePipes(new ValidationPipe({ transform: true }))
+  async register(@Body() registerDto: RegisterDto) {
+    return this.authService.register(registerDto);
   }
 
-  @Post('/login')
-  async login(@Body() body: unknown) {
-    const parsed = loginSchema.parse(body);
-    const user = await this.authService.validateUser(parsed.phone, parsed.password);
-    return this.authService.login(user);
+  @Post('login')
+  @UseGuards(LocalAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async login(@NestRequest() req: Request) { // 👈 Added type : Request
+    // req.user is usually added by Passport after successful LocalAuthGuard validation
+    return this.authService.login(req.user);
+  }
+
+  @Get('profile')
+  @UseGuards(JwtAuthGuard)
+  async getProfile(@NestRequest() req: Request) { // 👈 Added type : Request
+    // Depending on your JwtStrategy, the user data is usually in req.user
+    const user = req.user as any;
+    return this.authService.getProfile(user.sub);
+  }
+
+  @Post('logout')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  async logout(@NestRequest() req: Request) { // 👈 Added type : Request
+    const user = req.user as any;
+    return this.authService.logout(user.sub);
   }
 }
