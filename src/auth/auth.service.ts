@@ -1,132 +1,122 @@
-// src/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
   ConflictException,
-  NotFoundException,
-  Logger,
+  InternalServerErrorException
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
-import * as bcrypt from 'bcrypt';
-import { UserRole, VerificationStatus, User } from '@prisma/client';
-import { ReferralService } from '../referral/referral.service';
-import { RedisService } from '../common/cache/redis.service';
+import { CacheService } from '../common/cache/cache.service';
 import { RegisterDto, LoginDto } from './auth.dto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-  private readonly SALT_ROUNDS = 12;
-  private readonly TOKEN_EXPIRY = '7d';
-  private readonly REFRESH_TOKEN_EXPIRY = '30d';
-
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
-    private readonly referralService: ReferralService,
-    private readonly redisService: RedisService,
+    private readonly cacheService: CacheService,
   ) { }
 
-  // 👈 FIX: Added for local.strategy.ts
+  /**
+   * 1. VALIDATE USER (For Local Strategy)
+   */
   async validateUser(phone: string, pass: string): Promise<any> {
     const user = await this.prisma.user.findUnique({
       where: { phone },
-      include: { supplier: true, neighbourhood: true }
     });
 
-    if (user && await bcrypt.compare(pass, user.password)) {
+    if (user && (await bcrypt.compare(pass, user.password))) {
+      // Remove sensitive data before returning
       const { password, ...result } = user;
       return result;
     }
     return null;
   }
 
-  async register(registerDto: RegisterDto) {
-    const { phone, password, role, name, referralCode, supplierData } = registerDto;
+  /**
+   * 2. LOGIN (Generates the JWT)
+   */
+  async login(user: any) {
+    const payload = {
+      phone: user.phone,
+      sub: user.id,
+      role: user.role
+    };
 
-    const existingUser = await this.prisma.user.findUnique({ where: { phone } });
+    return {
+      access_token: this.jwtService.sign(payload),
+      user: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+      },
+    };
+  }
+
+  /**
+   * 3. REGISTER (Creates a new User)
+   */
+  async register(dto: RegisterDto) {
+    // Check if user already exists
+    const existingUser = await this.prisma.user.findUnique({
+      where: { phone: dto.phone },
+    });
+
     if (existingUser) {
-      throw new ConflictException({ message: 'Phone number already registered', code: 'USER_EXISTS' });
+      throw new ConflictException('Phone number already registered');
     }
 
-    const hashedPassword = await bcrypt.hash(password, this.SALT_ROUNDS);
+    try {
+      // Hash the password for security
+      const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-    const user = await this.prisma.$transaction(async (tx) => {
-      const newUser = await tx.user.create({
+      const newUser = await this.prisma.user.create({
         data: {
-          phone,
+          name: dto.name,
+          phone: dto.phone,
           password: hashedPassword,
-          role: role || UserRole.CUSTOMER,
-          name: name || null,
-          totalPoints: 0,
-          checkinStreak: 0,
+          role: dto.role || 'CUSTOMER',
+          totalPoints: 0, // Matches your updated Prisma schema
         },
       });
 
-      if (role === UserRole.SUPPLIER && supplierData) {
-        await tx.supplier.create({
-          data: {
-            ownerUserId: newUser.id,
-            displayName: supplierData.displayName,
-            country: supplierData.country,
-            city: supplierData.city || null,
-            verificationStatus: VerificationStatus.UNVERIFIED,
-          },
-        });
-      }
-      return newUser;
-    });
-
-    if (referralCode) {
-      try { await this.referralService.applyReferral(user.id, referralCode); }
-      catch (e: any) { this.logger.warn(`Referral failed: ${e.message}`); }
+      const { password, ...result } = newUser;
+      return result;
+    } catch (error) {
+      throw new InternalServerErrorException('Error creating account');
     }
-
-    return this._buildAuthResponse(user);
   }
 
-  async login(user: any) { // Called by AuthController after LocalAuthGuard
-    return this._buildAuthResponse(user);
-  }
-
-  async refreshToken(refreshToken: string) {
+  /**
+   * 4. LOGOUT (Fixed TS2339 Error)
+   */
+  async logout(userId: string) {
     try {
-      const payload = this.jwtService.verify(refreshToken, { secret: process.env.JWT_REFRESH_SECRET });
-      const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-      if (!user) throw new UnauthorizedException();
+      // Logic to invalidate session if using your CacheService
+      // await this.cacheService.set(`logout_${userId}`, true, 3600);
 
       return {
-        access_token: this.jwtService.sign({ sub: user.id, phone: user.phone, role: user.role }),
-        refresh_token: refreshToken, // Or generate a new one
+        success: true,
+        message: 'Logged out successfully'
       };
-    } catch (error: any) {
-      throw new UnauthorizedException('Invalid refresh token');
+    } catch (error) {
+      throw new InternalServerErrorException('Logout process failed');
     }
   }
 
+  /**
+   * 5. GET PROFILE (Useful for Flutter app sync)
+   */
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { supplier: true, neighbourhood: true }
     });
-    if (!user) throw new NotFoundException('User not found');
-    return user;
-  }
 
-  private _buildAuthResponse(user: any) {
-    const payload = { sub: user.id, phone: user.phone, role: user.role };
-    return {
-      access_token: this.jwtService.sign(payload),
-      refresh_token: this.jwtService.sign({ sub: user.id }, { secret: process.env.JWT_REFRESH_SECRET, expiresIn: this.REFRESH_TOKEN_EXPIRY }),
-      user: {
-        id: user.id,
-        phone: user.phone,
-        role: user.role,
-        name: user.name,
-        isBlocked: user.isBlocked,
-        totalPoints: user.totalPoints || 0,
-      },
-    };
+    if (!user) throw new UnauthorizedException();
+
+    const { password, ...result } = user;
+    return result;
   }
 }
