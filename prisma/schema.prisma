@@ -74,7 +74,6 @@ enum DeliveryType {
   SATELLITE_HUB
 }
 
-// ── NEW: InteractionType used by InteractionService / ProductService ──────────
 enum InteractionType {
   VIEW
   LIKE
@@ -88,7 +87,7 @@ model Category {
   name      String
   emoji     String
   slug      String   @unique
-  imageUrl  String?                        // 🔥 Added: used by getTopCategories() in HomeService
+  imageUrl  String?
   isActive  Boolean  @default(true)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
@@ -127,7 +126,7 @@ model Neighbourhood {
 
   users     User[]
   pools     Pool[]
-  suppliers Supplier[] @relation("SupplierNeighbourhood") // 🔥 Added: suppliers filter by neighbourhood
+  suppliers Supplier[] @relation("SupplierNeighbourhood")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -160,10 +159,8 @@ model User {
   referrals    User[]  @relation("UserReferrals")
   referralCode String? @unique
   rewardBalance Int    @default(0)
-
-  rewardBalance Int    @default(0)
-  totalPoints   Int    @default(0)   // 👈 add this
-  checkinStreak Int    @default(0)   // 👈 add this
+  totalPoints   Int    @default(0)
+  checkinStreak Int    @default(0)
   
   superCreatorId String?
   superCreator   User?   @relation("TeamCreatorSuper", fields: [superCreatorId], references: [id])
@@ -180,7 +177,6 @@ model User {
   notifications  InAppNotification[] @relation("UserNotifications")
   whatsappOptOut Boolean             @default(false)
 
-  // 🔥 Added: required by InteractionService / ProductService personalisation
   interactions UserProductInteraction[]
 }
 
@@ -190,13 +186,12 @@ model Supplier {
   displayName        String
   country            String
   city               String?
-  description        String?                        // 🔥 Added: returned by getProductById supplier select
+  description        String?
   verificationStatus VerificationStatus @default(UNVERIFIED)
   businessRegNumber  String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
 
-  // 🔥 Added: supplier neighbourhood (used in ProductService neighbourhoodId filter)
   neighbourhoodId String?
   neighbourhood   Neighbourhood? @relation("SupplierNeighbourhood", fields: [neighbourhoodId], references: [id])
 
@@ -206,7 +201,7 @@ model Supplier {
   orders         Order[]         @relation("SupplierOrders")
 
   @@index([verificationStatus])
-  @@index([neighbourhoodId])    // 🔥 Added: speeds up neighbourhood-based product filtering
+  @@index([neighbourhoodId])
 }
 
 // ==================== PRODUCT & INVENTORY ====================
@@ -216,13 +211,12 @@ model Product {
   supplierId  String
   title       String
   description String?
-  category    String?  // legacy free-text label — kept for backwards compat
+  category    String?
   categoryId  String?
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // 🔥 Added: used by ProductService price sort and updateMinPrice()
   minPrice    Int?
 
   supplier   Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
@@ -230,7 +224,6 @@ model Product {
   variants   ProductVariant[] @relation("ProductVariants")
   images     Image[]          @relation("ProductImages")
 
-  // 🔥 Added: used by ProductService popularity/trending sort and admin analytics
   stats        ProductStats?
   pools        Pool[]                   @relation("ProductPools")
   interactions UserProductInteraction[]
@@ -238,7 +231,7 @@ model Product {
   @@index([supplierId])
   @@index([categoryId])
   @@index([isActive, createdAt])
-  @@index([minPrice])            // 🔥 Added: price sort index
+  @@index([minPrice])
 }
 
 model ProductVariant {
@@ -272,11 +265,10 @@ model Image {
   @@index([productId])
 }
 
-// 🔥 NEW: Product popularity & trending score — used by ProductService sort
 model ProductStats {
   id        String  @id @default(uuid())
   productId String  @unique
-  score     Float   @default(0)   // weighted engagement score
+  score     Float   @default(0)
   views     Int     @default(0)
   likes     Int     @default(0)
   shares    Int     @default(0)
@@ -286,8 +278,6 @@ model ProductStats {
   @@index([score])
 }
 
-// 🔥 NEW: Individual interaction events — used by InteractionService and
-//         ProductService collaborative filtering for personalised recommendations
 model UserProductInteraction {
   id        String          @id @default(uuid())
   userId    String
@@ -300,8 +290,8 @@ model UserProductInteraction {
 
   @@index([userId])
   @@index([productId])
-  @@index([userId, productId])   // 🔥 speeds up "products this user has seen"
-  @@index([productId, userId])   // 🔥 speeds up "users who saw this product"
+  @@index([userId, productId])
+  @@index([productId, userId])
 }
 
 // ==================== AGGREGATION & POOLS ====================
@@ -335,7 +325,6 @@ model Pool {
   hubContactPhone String?
   hubName         String?
 
-  // 🔥 Added: direct Product relation (used in ProductService pool include + admin analytics)
   productId String?
   product   Product? @relation("ProductPools", fields: [productId], references: [id])
 
@@ -345,7 +334,7 @@ model Pool {
   orders        Order[]          @relation("PoolOrders")
 
   @@index([variantId])
-  @@index([productId])           // 🔥 Added
+  @@index([productId])
   @@index([status, deadlineAt])
   @@index([status, paymentWindowEndsAt])
 }
@@ -404,8 +393,8 @@ model Order {
   @@index([userId, createdAt])
   @@index([supplierId, createdAt])
   @@index([poolId])
-  @@index([status])              // 🔥 Added: used by admin order status filter
-  @@index([createdAt])           // 🔥 Added: used by admin date range filter
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Payment {
@@ -521,7 +510,7 @@ model PushToken {
   id        String   @id @default(uuid())
   userId    String
   token     String   @unique
-  platform  String   // "android" | "ios" | "web"
+  platform  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -535,7 +524,7 @@ model InAppNotification {
   userId    String
   title     String
   body      String
-  type      String   @default("INFO")  // "INFO" | "ORDER" | "POOL" | "SYSTEM" | "PROMO"
+  type      String   @default("INFO")
   isRead    Boolean  @default(false)
   deepLink  String?
   imageUrl  String?
@@ -555,14 +544,14 @@ model NotificationLog {
   deepLink    String?
   audience    String
   channels    String[]
-  status      String    @default("PENDING")   // "PENDING" | "SENT" | "FAILED" | "SCHEDULED"
+  status      String    @default("PENDING")
   scheduledAt DateTime?
   sentAt      DateTime?
   pushCount   Int       @default(0)
   inAppCount  Int       @default(0)
   waCount     Int       @default(0)
   failCount   Int       @default(0)
-  sentCount   Int       @default(0)            // 🔥 Added: used in notification history UI
+  sentCount   Int       @default(0)
   createdBy   String?
   error       String?
   createdAt   DateTime  @default(now())
