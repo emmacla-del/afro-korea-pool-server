@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, Req, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { NotBlockedGuard } from '../auth/not-blocked.guard'; // 👈 changed
+import { NotBlockedGuard } from '../auth/not-blocked.guard';
 import { requireUserId } from '../common/auth';
 import { PoolsService } from './pools.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +20,7 @@ const createTeamDealSchema = z.object({
   variantId: z.string().uuid(),
   teamPrice: z.number().int().positive(),
   minBuyers: z.number().int().min(2).optional().default(2),
+  neighbourhoodId: z.string().uuid().optional(), // 👈 added
 });
 
 @Controller()
@@ -45,7 +46,7 @@ export class PoolsController {
   }
 
   @Post('/pools/:id/commit')
-  @UseGuards(NotBlockedGuard) // 👈 changed
+  @UseGuards(NotBlockedGuard)
   async commit(@Req() req: FastifyRequest, @Param('id') poolId: string, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = commitSchema.parse(body);
@@ -62,7 +63,7 @@ export class PoolsController {
    * Supplier creates a team deal (Pinduoduo-style)
    */
   @Post('/pools/team')
-  @UseGuards(NotBlockedGuard) // 👈 changed
+  @UseGuards(NotBlockedGuard)
   async createTeamDeal(@Req() req: FastifyRequest, @Body() body: unknown) {
     const userId = requireUserId(req);
     const parsed = createTeamDealSchema.parse(body);
@@ -80,6 +81,7 @@ export class PoolsController {
       parsed.variantId,
       parsed.teamPrice,
       parsed.minBuyers,
+      parsed.neighbourhoodId, // 👈 pass through
     );
   }
 
@@ -95,7 +97,7 @@ export class PoolsController {
    * Customer joins a team deal
    */
   @Post('/pools/:id/join')
-  @UseGuards(NotBlockedGuard) // 👈 changed
+  @UseGuards(NotBlockedGuard)
   async joinTeamDeal(@Req() req: FastifyRequest, @Param('id') poolId: string) {
     const userId = requireUserId(req);
     return this.poolsService.joinTeamDeal(userId, poolId);

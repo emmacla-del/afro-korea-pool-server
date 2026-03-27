@@ -1,5 +1,16 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { CommitmentStatus, DealType, OrderStatus, PoolStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import {
+  CommitmentStatus,
+  DealType,
+  OrderStatus,
+  PoolStatus,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 const DEFAULT_PAYMENT_WINDOW_MINUTES = 24 * 60;
@@ -25,7 +36,9 @@ export class PoolsService {
 
     if (input.deadlineAt.getTime() > maxDeadlineTime) {
       throw new BadRequestException(
-        `deadlineAt cannot exceed 90 days from now. Max: ${new Date(maxDeadlineTime).toISOString()}`,
+        `deadlineAt cannot exceed 90 days from now. Max: ${new Date(
+          maxDeadlineTime,
+        ).toISOString()}`,
       );
     }
 
@@ -64,7 +77,9 @@ export class PoolsService {
       throw new BadRequestException('qty must be >= 0');
     }
 
-    const paymentWindowMinutes = Number(process.env.PAYMENT_WINDOW_MINUTES ?? DEFAULT_PAYMENT_WINDOW_MINUTES);
+    const paymentWindowMinutes = Number(
+      process.env.PAYMENT_WINDOW_MINUTES ?? DEFAULT_PAYMENT_WINDOW_MINUTES,
+    );
     if (!Number.isFinite(paymentWindowMinutes) || paymentWindowMinutes <= 0) {
       throw new BadRequestException('Invalid PAYMENT_WINDOW_MINUTES');
     }
@@ -76,11 +91,13 @@ export class PoolsService {
 
       const pool = await tx.pool.findUnique({
         where: { id: input.poolId },
-        include: { commitments: true, variant: { include: { product: true } } },
+        include: {
+          commitments: true,
+          variant: { include: { product: true } },
+        },
       });
       if (!pool) throw new NotFoundException('Pool not found');
 
-      // 👇 Ensure variant exists (pools always have a variant, but TypeScript needs a hint)
       if (!pool.variant) {
         throw new NotFoundException('Variant not found for this pool');
       }
@@ -96,7 +113,8 @@ export class PoolsService {
         where: { poolId_userId: { poolId: input.poolId, userId: input.userId } },
       });
 
-      const previousQty = existing?.status === CommitmentStatus.ACTIVE ? existing.qty : 0;
+      const previousQty =
+        existing?.status === CommitmentStatus.ACTIVE ? existing.qty : 0;
       let nextCommittedQty = pool.committedQty;
 
       if (input.qty === 0) {
@@ -112,7 +130,10 @@ export class PoolsService {
         nextCommittedQty += delta;
 
         if (nextCommittedQty > pool.thresholdQtySnapshot) {
-          const available = Math.max(0, pool.thresholdQtySnapshot - pool.committedQty + previousQty);
+          const available = Math.max(
+            0,
+            pool.thresholdQtySnapshot - pool.committedQty + previousQty,
+          );
           throw new BadRequestException(
             `Cannot commit ${input.qty} items. Pool would have ${nextCommittedQty} items, ` +
             `but threshold is ${pool.thresholdQtySnapshot}. Maximum available: ${available}`,
@@ -120,7 +141,9 @@ export class PoolsService {
         }
 
         await tx.commitment.upsert({
-          where: { poolId_userId: { poolId: input.poolId, userId: input.userId } },
+          where: {
+            poolId_userId: { poolId: input.poolId, userId: input.userId },
+          },
           create: {
             poolId: input.poolId,
             userId: input.userId,
@@ -186,8 +209,8 @@ export class PoolsService {
     variantId: string,
     teamPrice: number,
     minBuyers: number = 2,
+    neighbourhoodId?: string, // extended
   ) {
-    // Validate variant and supplier ownership
     const variant = await this.prisma.productVariant.findUnique({
       where: { id: variantId },
       include: { product: true },
@@ -197,7 +220,6 @@ export class PoolsService {
       throw new UnauthorizedException('You do not own this product');
     }
 
-    // 24-hour deadline
     const deadlineAt = new Date();
     deadlineAt.setHours(deadlineAt.getHours() + 24);
 
@@ -209,10 +231,11 @@ export class PoolsService {
         teamPrice,
         minBuyers,
         currentBuyers: 0,
-        thresholdQtySnapshot: 0, // not used
+        thresholdQtySnapshot: 0,
         committedQty: 0,
         deadlineAt,
         status: PoolStatus.OPEN,
+        ...(neighbourhoodId ? { neighbourhoodId } : {}),
       },
     });
   }
@@ -244,17 +267,15 @@ export class PoolsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Add a computed `participantCount` field for convenience
-    return pools.map(pool => ({
+    return pools.map((pool) => ({
       ...pool,
       participantCount: pool.commitments.length,
-      commitments: undefined, // remove raw commitments if not needed
+      commitments: undefined,
     }));
   }
 
   async joinTeamDeal(userId: string, poolId: string) {
     return this.prisma.$transaction(async (tx) => {
-      // Lock the pool row
       await tx.$queryRaw`SELECT id FROM "Pool" WHERE id = ${poolId} FOR UPDATE`;
 
       const pool = await tx.pool.findUnique({
@@ -266,16 +287,20 @@ export class PoolsService {
       if (pool.dealType !== DealType.TEAM_DEAL) {
         throw new BadRequestException('This is not a team deal');
       }
-      if (pool.status !== PoolStatus.OPEN) throw new ConflictException('Pool is not open');
-      if (pool.deadlineAt <= new Date()) throw new ConflictException('Pool expired');
+      if (pool.status !== PoolStatus.OPEN) {
+        throw new ConflictException('Pool is not open');
+      }
+      if (pool.deadlineAt <= new Date()) {
+        throw new ConflictException('Pool expired');
+      }
 
-      // Check if user already joined
       const existing = await tx.commitment.findUnique({
         where: { poolId_userId: { poolId, userId } },
       });
-      if (existing) throw new ConflictException('Already joined this deal');
+      if (existing) {
+        throw new ConflictException('Already joined this deal');
+      }
 
-      // Create commitment (qty = 1)
       await tx.commitment.create({
         data: {
           poolId,
@@ -285,7 +310,6 @@ export class PoolsService {
         },
       });
 
-      // Update pool counters
       const updatedPool = await tx.pool.update({
         where: { id: poolId },
         data: {
@@ -294,8 +318,6 @@ export class PoolsService {
         },
       });
 
-      // If minimum buyers reached, lock the pool (transition to PAYMENT_WINDOW)
-      // Use non-null assertion because for team deals these fields are guaranteed to be set.
       if (updatedPool.currentBuyers! >= updatedPool.minBuyers!) {
         await tx.pool.update({
           where: { id: poolId },
@@ -308,6 +330,7 @@ export class PoolsService {
   }
 
   // --- Existing expiry and finalization methods (unchanged) ---
+
   async finalizePoolIfNeeded(poolId: string) {
     const now = new Date();
 
@@ -320,12 +343,15 @@ export class PoolsService {
       });
       if (!pool) throw new NotFoundException('Pool not found');
 
-      // 👇 Ensure variant exists (pool must have a variant to be in payment window)
       if (!pool.variant) {
         throw new NotFoundException('Variant not found for this pool');
       }
 
-      if (pool.status !== PoolStatus.PAYMENT_WINDOW || !pool.paymentWindowEndsAt) return pool;
+      if (
+        pool.status !== PoolStatus.PAYMENT_WINDOW ||
+        !pool.paymentWindowEndsAt
+      )
+        return pool;
       if (pool.paymentWindowEndsAt.getTime() > now.getTime()) return pool;
 
       if (pool.paidQty < pool.thresholdQtySnapshot) {
@@ -344,12 +370,14 @@ export class PoolsService {
       }
 
       if (pool.purchaseOrder) {
-        return tx.pool.update({ where: { id: pool.id }, data: { status: PoolStatus.PURCHASED } });
+        return tx.pool.update({
+          where: { id: pool.id },
+          data: { status: PoolStatus.PURCHASED },
+        });
       }
 
       const supplierId = pool.variant.product.supplierId;
 
-      // 👇 Ensure variantId is not null before creating purchase order
       if (!pool.variantId) {
         throw new Error('Cannot create purchase order: variantId is null');
       }
@@ -372,7 +400,14 @@ export class PoolsService {
               },
             ],
           },
-          events: { create: [{ status: 'CREATED', note: 'Auto-created from successful pool' }] },
+          events: {
+            create: [
+              {
+                status: 'CREATED',
+                note: 'Auto-created from successful pool',
+              },
+            ],
+          },
         },
       });
 
@@ -423,8 +458,8 @@ export class PoolsService {
     for (const pool of candidates) {
       try {
         await this.expirePoolIfPastDeadline(pool.id);
-      } catch (err) {
-        // fail silently per pool
+      } catch (_) {
+        // ignore per-pool failures
       }
     }
   }
@@ -432,15 +467,18 @@ export class PoolsService {
   async finalizePaymentWindowsPastDeadline() {
     const now = new Date();
     const candidates = await this.prisma.pool.findMany({
-      where: { status: PoolStatus.PAYMENT_WINDOW, paymentWindowEndsAt: { lte: now } },
+      where: {
+        status: PoolStatus.PAYMENT_WINDOW,
+        paymentWindowEndsAt: { lte: now },
+      },
       select: { id: true },
       take: 50,
     });
     for (const pool of candidates) {
       try {
         await this.finalizePoolIfNeeded(pool.id);
-      } catch (err) {
-        // fail silently per pool
+      } catch (_) {
+        // ignore per-pool failures
       }
     }
   }
