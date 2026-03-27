@@ -71,7 +71,7 @@ export class ProductService {
         orderBy[sortBy] = order;
     }
 
-    // Cache key (excludes useCache flag itself)
+    // Cache key
     const cacheKey = `products:${JSON.stringify({ skip, take, categoryId, supplierId, sortBy, order, search, userId, neighbourhoodId })}`;
     if (useCache) {
       const cached = await this.cacheService.get<any>(cacheKey);
@@ -94,7 +94,7 @@ export class ProductService {
           pools: {
             where: { status: 'OPEN' },
             take: 1,
-            select: { id: true, currentBuyers: true, minBuyers: true, deadlineAt: true },
+            select: { id: true, currentBuyers: true, minBuyers: true, deadlineAt: true, teamPrice: true },
           },
         },
       }),
@@ -102,13 +102,24 @@ export class ProductService {
     ]);
 
     const result = {
-      data: products.map((product) => ({
-        ...product,
-        hasActiveDeal: !!product.pools[0],
-        dealProgress: product.pools[0] && product.pools[0].minBuyers && product.pools[0].currentBuyers !== null
-          ? product.pools[0].currentBuyers / product.pools[0].minBuyers
-          : 0,
-      })),
+      data: products.map((product) => {
+        const firstVariant = product.variants[0];
+        const activePool = product.pools[0];
+        const hasActiveDeal = !!activePool;
+        return {
+          ...product,
+          // Ensure price from variant is available at root
+          price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
+          teamPrice: activePool?.teamPrice ?? null,
+          minBuyers: activePool?.minBuyers ?? null,
+          currentBuyers: activePool?.currentBuyers ?? 0,
+          dealEndTime: activePool?.deadlineAt ?? null,
+          hasActiveDeal,
+          dealProgress: hasActiveDeal && activePool?.minBuyers
+            ? (activePool.currentBuyers ?? 0) / activePool.minBuyers
+            : 0,
+        };
+      }),
       total,
       skip,
       take,
@@ -139,13 +150,34 @@ export class ProductService {
           },
         },
         stats: true,
+        pools: {
+          where: { status: 'OPEN' },
+          take: 1,
+          select: { id: true, currentBuyers: true, minBuyers: true, deadlineAt: true, teamPrice: true },
+        },
         _count: { select: { pools: { where: { status: 'OPEN' } } } },
       },
     });
 
     if (!product) throw new NotFoundException(`Product with ID ${id} not found`);
 
-    // Track view asynchronously — never blocks the response
+    // Enhance product with team deal fields at root
+    const activePool = product.pools[0];
+    const firstVariant = product.variants[0];
+    const enhancedProduct = {
+      ...product,
+      price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
+      teamPrice: activePool?.teamPrice ?? null,
+      minBuyers: activePool?.minBuyers ?? null,
+      currentBuyers: activePool?.currentBuyers ?? 0,
+      dealEndTime: activePool?.deadlineAt ?? null,
+      hasActiveDeal: !!activePool,
+      dealProgress: activePool && activePool.minBuyers
+        ? (activePool.currentBuyers ?? 0) / activePool.minBuyers
+        : 0,
+    };
+
+    // Track view asynchronously
     if (userId) {
       this.interactionService
         .trackInteraction(userId, id, InteractionType.VIEW)
@@ -155,7 +187,7 @@ export class ProductService {
         });
     }
 
-    return product;
+    return enhancedProduct;
   }
 
   /**
@@ -213,7 +245,11 @@ export class ProductService {
         variants: { take: 1 },
         supplier: true,
         stats: true,
-        pools: { where: { status: 'OPEN' }, take: 1 },
+        pools: {
+          where: { status: 'OPEN' },
+          take: 1,
+          select: { id: true, currentBuyers: true, minBuyers: true, deadlineAt: true, teamPrice: true },
+        },
       },
     });
 
@@ -221,18 +257,30 @@ export class ProductService {
       .map((productId) => products.find((product) => product.id === productId))
       .filter((product): product is NonNullable<typeof product> => product !== undefined);
 
-    return {
-      data: sortedProducts.map((product) => ({
-        ...product,
-        hasActiveDeal: !!product.pools[0],
-        dealProgress: product.pools[0] && product.pools[0].minBuyers && product.pools[0].currentBuyers !== null
-          ? product.pools[0].currentBuyers / product.pools[0].minBuyers
-          : 0,
-      })),
+    const result = {
+      data: sortedProducts.map((product) => {
+        const firstVariant = product.variants[0];
+        const activePool = product.pools[0];
+        const hasActiveDeal = !!activePool;
+        return {
+          ...product,
+          price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
+          teamPrice: activePool?.teamPrice ?? null,
+          minBuyers: activePool?.minBuyers ?? null,
+          currentBuyers: activePool?.currentBuyers ?? 0,
+          dealEndTime: activePool?.deadlineAt ?? null,
+          hasActiveDeal,
+          dealProgress: hasActiveDeal && activePool?.minBuyers
+            ? (activePool.currentBuyers ?? 0) / activePool.minBuyers
+            : 0,
+        };
+      }),
       total: sortedProducts.length,
       skip: 0,
       take,
     };
+
+    return result;
   }
 
   /**
@@ -265,7 +313,7 @@ export class ProductService {
       data: { minPrice: minVariant?.unitPriceXaf ?? null },
     });
 
-    // 🔥 Invalidate: product lists, specific product, and home feed
+    // Invalidate caches
     await this.cacheService.delPatterns(
       'products:*',
       `product:${productId}`,

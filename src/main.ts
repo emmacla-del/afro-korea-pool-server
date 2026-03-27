@@ -3,11 +3,14 @@ import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
+import fastifyStatic from '@fastify/static'; // 👈 ADD THIS
 import multipart from '@fastify/multipart';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { initDatabase } from './db';
 import { initSentry } from './sentry.config';
+import { join } from 'path';
+import { mkdirSync, existsSync } from 'fs';
 
 async function bootstrap() {
   initSentry();
@@ -16,6 +19,13 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 3000);
   const host = process.env.HOST ?? '0.0.0.0';
   const bodyLimit = Number(process.env.JSON_BODY_LIMIT_BYTES ?? '') || 1024 * 1024;
+
+  // Ensure uploads directory exists
+  const uploadsDir = join(__dirname, '..', 'uploads');
+  if (!existsSync(uploadsDir)) {
+    mkdirSync(uploadsDir, { recursive: true });
+    console.log(`✅ Created uploads directory at ${uploadsDir}`);
+  }
 
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
@@ -37,6 +47,13 @@ async function bootstrap() {
       return process.env.NODE_ENV === 'production' ? false : true;
     })(),
     credentials: true,
+  });
+
+  // ✅ Serve uploaded files via Fastify static (works with Fastify adapter)
+  await app.register(fastifyStatic, {
+    root: uploadsDir,
+    prefix: '/uploads/',
+    decorateReply: false,
   });
 
   await app.register(multipart, {
