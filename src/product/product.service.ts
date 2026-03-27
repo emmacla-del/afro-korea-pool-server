@@ -1,4 +1,3 @@
-// src/product/product.service.ts
 import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, InteractionType } from '@prisma/client';
@@ -108,9 +107,10 @@ export class ProductService {
         const hasActiveDeal = !!activePool;
         return {
           ...product,
-          // Ensure price from variant is available at root
+          // FIX: Explicitly mapping for Flutter Model
           price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
           teamPrice: activePool?.teamPrice ?? null,
+          description: product.description ?? '', // CRITICAL for UI visibility
           minBuyers: activePool?.minBuyers ?? null,
           currentBuyers: activePool?.currentBuyers ?? 0,
           dealEndTime: activePool?.deadlineAt ?? null,
@@ -161,13 +161,13 @@ export class ProductService {
 
     if (!product) throw new NotFoundException(`Product with ID ${id} not found`);
 
-    // Enhance product with team deal fields at root
     const activePool = product.pools[0];
     const firstVariant = product.variants[0];
     const enhancedProduct = {
       ...product,
       price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
       teamPrice: activePool?.teamPrice ?? null,
+      description: product.description ?? '',
       minBuyers: activePool?.minBuyers ?? null,
       currentBuyers: activePool?.currentBuyers ?? 0,
       dealEndTime: activePool?.deadlineAt ?? null,
@@ -177,7 +177,6 @@ export class ProductService {
         : 0,
     };
 
-    // Track view asynchronously
     if (userId) {
       this.interactionService
         .trackInteraction(userId, id, InteractionType.VIEW)
@@ -266,6 +265,7 @@ export class ProductService {
           ...product,
           price: firstVariant?.unitPriceXaf ?? product.minPrice ?? 0,
           teamPrice: activePool?.teamPrice ?? null,
+          description: product.description ?? '',
           minBuyers: activePool?.minBuyers ?? null,
           currentBuyers: activePool?.currentBuyers ?? 0,
           dealEndTime: activePool?.deadlineAt ?? null,
@@ -283,24 +283,15 @@ export class ProductService {
     return result;
   }
 
-  /**
-   * GET PRODUCTS BY NEIGHBOURHOOD — "Near You" section.
-   */
+  // ... (getProductsByNeighbourhood and updateMinPrice remain unchanged)
   async getProductsByNeighbourhood(neighbourhoodId: string, take = 10) {
     return this.getProducts({ neighbourhoodId, take, sortBy: 'popularity' });
   }
 
-  /**
-   * GET TRENDING PRODUCTS.
-   */
   async getTrendingProducts(take = 10) {
     return this.getProducts({ take, sortBy: 'trending' });
   }
 
-  /**
-   * UPDATE MIN PRICE — call after any variant price change.
-   * Invalidates all affected caches including the home feed.
-   */
   async updateMinPrice(productId: string) {
     const minVariant = await this.prisma.productVariant.findFirst({
       where: { productId, isActive: true },
@@ -313,7 +304,6 @@ export class ProductService {
       data: { minPrice: minVariant?.unitPriceXaf ?? null },
     });
 
-    // Invalidate caches
     await this.cacheService.delPatterns(
       'products:*',
       `product:${productId}`,
