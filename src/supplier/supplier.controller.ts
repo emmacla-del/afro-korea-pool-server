@@ -16,11 +16,15 @@ import { NotBlockedGuard } from '../auth/not-blocked.guard';
 import { requireUserId } from '../common/auth';
 import { SupplierService } from './supplier.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { CatalogService } from '../catalog/catalog.service'; // 👈 added
 
 @Controller('supplier')
 @UseGuards(NotBlockedGuard)
 export class SupplierController {
-    constructor(private readonly supplierService: SupplierService) { }
+    constructor(
+        private readonly supplierService: SupplierService,
+        private readonly catalogService: CatalogService, // 👈 added
+    ) { }
 
     // ── Profile & Summary ──────────────────────────────────────────────────────
 
@@ -46,13 +50,46 @@ export class SupplierController {
         return this.supplierService.getProducts(userId);
     }
 
+    /**
+     * POST /supplier/products
+     * Handles multipart form data (product fields + images)
+     * Creates a product and optionally a team deal pool.
+     */
     @Post('products')
-    async createProduct(
-        @Req() req: FastifyRequest,
-        @Body() dto: CreateProductDto,
-    ) {
+    async createProduct(@Req() req: FastifyRequest) {
         const userId = requireUserId(req);
-        return this.supplierService.createProduct(userId, dto);
+        const parts = (req as any).parts();
+        const fields: Record<string, any> = {};
+        const files: Array<{ buffer: Buffer; filename: string; mimetype: string }> = [];
+
+        for await (const part of parts) {
+            if (part.type === 'file') {
+                const buffer = await part.toBuffer();
+                files.push({
+                    buffer,
+                    filename: part.filename,
+                    mimetype: part.mimetype,
+                });
+            } else {
+                fields[part.fieldname] = part.value;
+            }
+        }
+
+        // Map frontend fields to the format expected by CatalogService.createProductWithImages
+        const dto = {
+            product_name: fields.product_name,
+            description: fields.description,
+            price: Number(fields.price),
+            stock: Number(fields.stock),
+            category: fields.category,
+            teamPrice: fields.teamPrice ? Number(fields.teamPrice) : undefined,
+            minBuyers: fields.minBuyers ? Number(fields.minBuyers) : undefined,
+            teamDealNeighbourhoodId: fields.teamDealNeighbourhoodId,
+        };
+
+        // Call catalog service to create product, upload images, and create team deal pool
+        const result = await this.catalogService.createProductWithImages(userId, dto, files);
+        return { id: result.id };
     }
 
     @Put('products/:id')
