@@ -1,5 +1,5 @@
 // src/product/product.controller.ts
-import { Controller, Get, Param, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ProductService } from './product.service';
 
 @Controller('products')

@@ -7,10 +7,14 @@ import {
 import { PurchaseOrderStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
+import { CatalogService } from '../catalog/catalog.service'; // 👈 added
 
 @Injectable()
 export class SupplierService {
-  constructor(private readonly prisma: PrismaService) { }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly catalogService: CatalogService, // 👈 added
+  ) { }
 
   // ── Internal helper ────────────────────────────────────────────────────────
 
@@ -142,7 +146,6 @@ export class SupplierService {
       // 4. Handle images
       if (dto.images && dto.images.length > 0) {
         await tx.image.createMany({
-          // Add types to url and idx below 
           data: dto.images.map((url: string, idx: number) => ({
             url,
             productId: product.id,
@@ -411,10 +414,15 @@ export class SupplierService {
     });
   }
 
-  // ── Catalog imports (stub) ─────────────────────────────────────────────────
+  // ── Catalog imports ────────────────────────────────────────────────────────
 
   async getLatestCatalogImport(userId: string) {
-    await this.getSupplierForUser(userId); // auth check
-    return { status: 'NOT_IMPLEMENTED', message: 'Catalog import coming soon' };
+    // Delegate to CatalogService (which should have the logic)
+    return this.catalogService.getLatestCatalogImport(userId);
+  }
+
+  async importCatalog(userId: string, importData: any) {
+    // Delegate to CatalogService
+    return this.catalogService.importCatalog(userId, importData);
   }
 }

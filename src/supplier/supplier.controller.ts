@@ -1,3 +1,4 @@
+// src/supplier/supplier.controller.ts
 import {
     Controller,
     Get,
@@ -117,5 +118,19 @@ export class SupplierController {
     ) {
         const userId = requireUserId(req);
         return this.supplierService.markDelivered(userId, id, body.note);
+    }
+
+    // ── Catalog Imports (added) ────────────────────────────────────────────────
+
+    @Get('catalog-imports/latest')
+    async latestCatalogImport(@Req() req: FastifyRequest) {
+        const userId = requireUserId(req);
+        return this.supplierService.getLatestCatalogImport(userId);
+    }
+
+    @Post('catalog/import')
+    async importCatalog(@Req() req: FastifyRequest, @Body() body: any) {
+        const userId = requireUserId(req);
+        return this.supplierService.importCatalog(userId, body);
     }
 }
