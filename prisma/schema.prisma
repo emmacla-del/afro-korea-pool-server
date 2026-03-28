@@ -207,31 +207,38 @@ model Supplier {
 // ==================== PRODUCT & INVENTORY ====================
 
 model Product {
-  id          String   @id @default(uuid())
-  supplierId  String
-  title       String
-  description String?
-  category    String?
-  categoryId  String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                      String   @id @default(uuid())
+  supplierId              String
+  title                   String
+  description             String?
+  category                String?
+  categoryId              String?
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
-  minPrice    Int?
+  minPrice                Int?
 
-  supplier   Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
-  category_  Category?        @relation(fields: [categoryId], references: [id])
-  variants   ProductVariant[] @relation("ProductVariants")
-  images     Image[]          @relation("ProductImages")
+  // === TEAM DEAL FIELDS (Unified) ===
+  teamPrice               Int?     @map("team_price")
+  minBuyers               Int?     @map("min_buyers")
+  teamDealNeighbourhoodId String?  @map("team_deal_neighbourhood_id")
 
-  stats        ProductStats?
-  pools        Pool[]                   @relation("ProductPools")
-  interactions UserProductInteraction[]
+  // === RELATIONS ===
+  supplier                Supplier         @relation("SupplierProducts", fields: [supplierId], references: [id])
+  category_               Category?        @relation(fields: [categoryId], references: [id])
+  variants                ProductVariant[] @relation("ProductVariants")
+  images                  Image[]          @relation("ProductImages")
+  stats                   ProductStats?
+  pools                   Pool[]           @relation("ProductPools")
+  interactions            UserProductInteraction[]
 
+  // === INDEXES ===
   @@index([supplierId])
   @@index([categoryId])
   @@index([isActive, createdAt])
   @@index([minPrice])
+  @@index([teamPrice])
 }
 
 model ProductVariant {

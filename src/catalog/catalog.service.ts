@@ -22,7 +22,7 @@ export class CatalogService {
     private cacheService: CacheService,
     private productService: ProductService,
     private dealService: DealService,
-  ) {}
+  ) { }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -339,13 +339,18 @@ export class CatalogService {
   async findOne(productId: string, userId?: string) {
     const product = await this.productService.getProductById(productId, userId);
 
-    const variantIds = (product.variants ?? []).map((variant) => variant.id);
+    // 1. Explicitly type 'variant' as any to satisfy the compiler
+    const variantIds = (product.variants ?? []).map((variant: any) => variant.id);
+
     const pools = await this.dealService.getPoolsForVariants(variantIds);
     this.dealService.attachPoolsToVariants(product.variants ?? [], pools);
 
     return {
       ...product,
-      images: (product.images ?? []).map((image) => this.normaliseImageUrl(image.url)),
+      // 2. Explicitly type 'image' as any
+      images: (product.images ?? []).map((image: any) =>
+        this.normaliseImageUrl(image.url)
+      ),
       variants: product.variants ?? [],
     };
   }

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PurchaseOrderStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { CreateProductDto } from './dto/create-product.dto';
 
 @Injectable()
 export class SupplierService {
@@ -76,65 +77,96 @@ export class SupplierService {
     const supplier = await this.getSupplierForUser(userId);
 
     const [total, active, inactive] = await this.prisma.$transaction([
-      this.prisma.product.count({
-        where: { supplierId: supplier.id },
-      }),
-      this.prisma.product.count({
-        where: { supplierId: supplier.id, isActive: true },
-      }),
-      this.prisma.product.count({
-        where: { supplierId: supplier.id, isActive: false },
-      }),
+      this.prisma.product.count({ where: { supplierId: supplier.id } }),
+      this.prisma.product.count({ where: { supplierId: supplier.id, isActive: true } }),
+      this.prisma.product.count({ where: { supplierId: supplier.id, isActive: false } }),
     ]);
 
     return { total, active, inactive };
   }
 
-  async createProduct(
-    userId: string,
-    data: {
-      title: string;
-      description?: string;
-      categoryId?: string;
-      unitPriceXaf: number;
-      thresholdQty: number;
-      leadTimeDays?: number;
-    },
-  ) {
+  /**
+   * Create a new product, optionally with a team deal (Pool).
+   * Uses a transaction to ensure atomicity.
+   */
+  async createProduct(userId: string, dto: CreateProductDto) {
     const supplier = await this.getSupplierForUser(userId);
 
     return this.prisma.$transaction(async (tx) => {
+      // 1. Create product (store team fields for fast filtering)
       const product = await tx.product.create({
         data: {
           supplierId: supplier.id,
-          title: data.title,
-          description: data.description,
-          categoryId: data.categoryId,
+          title: dto.title,
+          description: dto.description,
+          categoryId: dto.categoryId,
+          minPrice: dto.price,
+          teamPrice: dto.teamPrice,
+          minBuyers: dto.minBuyers,
+          teamDealNeighbourhoodId: dto.teamDealNeighbourhoodId || supplier.neighbourhoodId,
         },
       });
 
+      // 2. Create the primary variant
       const sku = `SKU-${supplier.id.substring(0, 6).toUpperCase()}-${Date.now()}`;
-
-      await tx.productVariant.create({
+      const variant = await tx.productVariant.create({
         data: {
           productId: product.id,
           sku,
-          unitPriceXaf: Math.round(data.unitPriceXaf),
-          thresholdQty: data.thresholdQty,
-          leadTimeDays: data.leadTimeDays ?? 14,
+          unitPriceXaf: Math.round(dto.price),
+          thresholdQty: dto.stock ?? 999, // high default = "unlimited"
+          leadTimeDays: 7, // standard for Cameroon logistics
+          isActive: true,
         },
       });
 
+      // 3. If a team deal was requested, create the Pool (with snapshots)
+      if (dto.teamPrice && dto.minBuyers) {
+        await tx.pool.create({
+          data: {
+            variantId: variant.id,
+            productId: product.id,
+            dealType: 'TEAM_DEAL',
+            status: 'OPEN',
+            minBuyers: dto.minBuyers,
+            teamPrice: dto.teamPrice,
+            unitPriceXafSnapshot: dto.price,
+            thresholdQtySnapshot: dto.minBuyers,
+            committedQty: 0,
+            neighbourhoodId: dto.teamDealNeighbourhoodId || supplier.neighbourhoodId,
+            deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+          },
+        });
+      }
+
+      // 4. Handle images
+      if (dto.images && dto.images.length > 0) {
+        await tx.image.createMany({
+          // Add types to url and idx below 
+          data: dto.images.map((url: string, idx: number) => ({
+            url,
+            productId: product.id,
+            order: idx,
+          })),
+        });
+      }
+
+      // 5. Return the full product (including the active pool for immediate UI feedback)
       return tx.product.findUnique({
         where: { id: product.id },
         include: {
-          variants: true,
+          variants: { where: { isActive: true } },
+          images: { orderBy: { order: 'asc' } },
           category_: { select: { id: true, name: true, emoji: true } },
+          pools: { where: { status: 'OPEN' }, take: 1 },
         },
       });
     });
   }
 
+  /**
+   * Update a product. If deactivating (isActive: false), automatically close any open pools.
+   */
   async updateProduct(
     userId: string,
     productId: string,
@@ -142,7 +174,7 @@ export class SupplierService {
       title?: string;
       description?: string;
       categoryId?: string;
-      isActive?: boolean;
+      isActive?: boolean; // If false, close associated open pools
       unitPriceXaf?: number;
       thresholdQty?: number;
     },
@@ -156,36 +188,47 @@ export class SupplierService {
 
     const { unitPriceXaf, thresholdQty, ...productData } = data;
 
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: productData,
-    });
-
-    // Update the latest active variant's price/stock if provided
-    if (unitPriceXaf !== undefined || thresholdQty !== undefined) {
-      const variant = await this.prisma.productVariant.findFirst({
-        where: { productId, isActive: true },
-        orderBy: { createdAt: 'desc' },
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Update product
+      const updatedProduct = await tx.product.update({
+        where: { id: productId },
+        data: productData,
       });
-      if (variant) {
-        await this.prisma.productVariant.update({
-          where: { id: variant.id },
-          data: {
-            ...(unitPriceXaf !== undefined
-              ? { unitPriceXaf: Math.round(unitPriceXaf) }
-              : {}),
-            ...(thresholdQty !== undefined ? { thresholdQty } : {}),
-          },
+
+      // 2. If product is being deactivated, close any open pools
+      if (data.isActive === false) {
+        await tx.pool.updateMany({
+          where: { productId, status: 'OPEN' },
+          data: { status: 'EXPIRED' }, // or 'CANCELLED' – choose based on your enum
         });
       }
-    }
 
-    return this.prisma.product.findUnique({
-      where: { id: productId },
-      include: {
-        variants: { where: { isActive: true }, orderBy: { createdAt: 'desc' } },
-        category_: { select: { id: true, name: true, emoji: true } },
-      },
+      // 3. Update the latest variant if price or stock changed
+      if (unitPriceXaf !== undefined || thresholdQty !== undefined) {
+        const variant = await tx.productVariant.findFirst({
+          where: { productId, isActive: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (variant) {
+          await tx.productVariant.update({
+            where: { id: variant.id },
+            data: {
+              ...(unitPriceXaf !== undefined && { unitPriceXaf: Math.round(unitPriceXaf) }),
+              ...(thresholdQty !== undefined && { thresholdQty }),
+            },
+          });
+        }
+      }
+
+      // 4. Return the product with includes (including any remaining open pools)
+      return tx.product.findUnique({
+        where: { id: productId },
+        include: {
+          variants: { where: { isActive: true }, orderBy: { createdAt: 'desc' } },
+          category_: { select: { id: true, name: true, emoji: true } },
+          pools: { where: { status: 'OPEN' } },
+        },
+      });
     });
   }
 
@@ -197,11 +240,8 @@ export class SupplierService {
     });
     if (!product) throw new NotFoundException('Product not found');
 
-    // Soft delete — just deactivate
-    await this.prisma.product.update({
-      where: { id: productId },
-      data: { isActive: false },
-    });
+    // Soft delete — just deactivate (which also closes open pools via updateProduct)
+    await this.updateProduct(userId, productId, { isActive: false });
 
     return { success: true, productId };
   }
@@ -214,11 +254,7 @@ export class SupplierService {
     return this.prisma.purchaseOrder.findMany({
       where: { supplierId: supplier.id },
       include: {
-        items: {
-          include: {
-            purchaseOrder: false,
-          },
-        },
+        items: true,
         events: { orderBy: { createdAt: 'desc' } },
         pool: {
           select: {
@@ -246,33 +282,20 @@ export class SupplierService {
   async getPurchaseOrdersSummary(userId: string) {
     const supplier = await this.getSupplierForUser(userId);
 
-    const [pending, confirmed, shipped, delivered] =
-      await this.prisma.$transaction([
-        this.prisma.purchaseOrder.count({
-          where: {
-            supplierId: supplier.id,
-            status: PurchaseOrderStatus.PENDING_SUPPLIER_CONFIRM,
-          },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: {
-            supplierId: supplier.id,
-            status: PurchaseOrderStatus.CONFIRMED,
-          },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: {
-            supplierId: supplier.id,
-            status: PurchaseOrderStatus.SHIPPED,
-          },
-        }),
-        this.prisma.purchaseOrder.count({
-          where: {
-            supplierId: supplier.id,
-            status: PurchaseOrderStatus.DELIVERED,
-          },
-        }),
-      ]);
+    const [pending, confirmed, shipped, delivered] = await this.prisma.$transaction([
+      this.prisma.purchaseOrder.count({
+        where: { supplierId: supplier.id, status: PurchaseOrderStatus.PENDING_SUPPLIER_CONFIRM },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: { supplierId: supplier.id, status: PurchaseOrderStatus.CONFIRMED },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: { supplierId: supplier.id, status: PurchaseOrderStatus.SHIPPED },
+      }),
+      this.prisma.purchaseOrder.count({
+        where: { supplierId: supplier.id, status: PurchaseOrderStatus.DELIVERED },
+      }),
+    ]);
 
     return { pending, confirmed, shipped, delivered };
   }
@@ -286,9 +309,7 @@ export class SupplierService {
     if (!po) throw new NotFoundException('Purchase order not found');
 
     if (po.status !== PurchaseOrderStatus.PENDING_SUPPLIER_CONFIRM) {
-      throw new BadRequestException(
-        `Cannot confirm a purchase order with status: ${po.status}`,
-      );
+      throw new BadRequestException(`Cannot confirm a purchase order with status: ${po.status}`);
     }
 
     return this.prisma.purchaseOrder.update({
@@ -391,7 +412,6 @@ export class SupplierService {
   }
 
   // ── Catalog imports (stub) ─────────────────────────────────────────────────
-  // Implement when you add bulk CSV/Excel import support.
 
   async getLatestCatalogImport(userId: string) {
     await this.getSupplierForUser(userId); // auth check
