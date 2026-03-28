@@ -39,18 +39,12 @@ export class SupplierController {
 
     // ── Product Management ─────────────────────────────────────────────────────
 
-    /**
-     * GET /supplier/products
-     */
     @Get('products')
     async getProducts(@Req() req: FastifyRequest) {
         const userId = requireUserId(req);
         return this.supplierService.getProducts(userId);
     }
 
-    /**
-     * POST /supplier/products
-     */
     @Post('products')
     async createProduct(
         @Req() req: FastifyRequest,
@@ -60,22 +54,16 @@ export class SupplierController {
         return this.supplierService.createProduct(userId, dto);
     }
 
-    /**
-     * PUT /supplier/products/:id
-     */
     @Put('products/:id')
     async updateProduct(
         @Req() req: FastifyRequest,
         @Param('id') productId: string,
-        @Body() data: any, // You can create an UpdateProductDto later
+        @Body() data: any,
     ) {
         const userId = requireUserId(req);
         return this.supplierService.updateProduct(userId, productId, data);
     }
 
-    /**
-     * DELETE /supplier/products/:id
-     */
     @Delete('products/:id')
     async deleteProduct(
         @Req() req: FastifyRequest,
@@ -87,9 +75,6 @@ export class SupplierController {
 
     // ── Orders & Logistics ─────────────────────────────────────────────────────
 
-    /**
-     * GET /supplier/orders
-     */
     @Get('orders')
     async getOrders(
         @Req() req: FastifyRequest,
@@ -112,5 +97,25 @@ export class SupplierController {
     ) {
         const userId = requireUserId(req);
         return this.supplierService.confirmPurchaseOrder(userId, id);
+    }
+
+    @Post('purchase-orders/:id/shipped')
+    async markShipped(
+        @Req() req: FastifyRequest,
+        @Param('id') id: string,
+        @Body() body: { trackingCode?: string; note?: string },
+    ) {
+        const userId = requireUserId(req);
+        return this.supplierService.markShipped(userId, id, body.trackingCode, body.note);
+    }
+
+    @Post('purchase-orders/:id/delivered')
+    async markDelivered(
+        @Req() req: FastifyRequest,
+        @Param('id') id: string,
+        @Body() body: { note?: string },
+    ) {
+        const userId = requireUserId(req);
+        return this.supplierService.markDelivered(userId, id, body.note);
     }
 }
