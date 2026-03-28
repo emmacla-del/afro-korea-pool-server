@@ -1,3 +1,4 @@
+// src/supplier/supplier.service.ts
 import {
   ForbiddenException,
   Injectable,
@@ -7,13 +8,13 @@ import {
 import { PurchaseOrderStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
-import { CatalogService } from '../catalog/catalog.service'; // 👈 added
+import { CatalogService } from '../catalog/catalog.service';
 
 @Injectable()
 export class SupplierService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly catalogService: CatalogService, // 👈 added
+    private readonly catalogService: CatalogService,
   ) { }
 
   // ── Internal helper ────────────────────────────────────────────────────────
@@ -22,6 +23,13 @@ export class SupplierService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: { supplier: true },
+    });
+    console.log('[DEBUG] getSupplierForUser:', {
+      userId,
+      userExists: !!user,
+      userRole: user?.role,
+      hasSupplier: !!user?.supplier,
+      supplierId: user?.supplier?.id,
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.role !== UserRole.SUPPLIER || !user.supplier) {
@@ -118,8 +126,8 @@ export class SupplierService {
           productId: product.id,
           sku,
           unitPriceXaf: Math.round(dto.price),
-          thresholdQty: dto.stock ?? 999, // high default = "unlimited"
-          leadTimeDays: 7, // standard for Cameroon logistics
+          thresholdQty: dto.stock ?? 999,
+          leadTimeDays: 7,
           isActive: true,
         },
       });
@@ -138,7 +146,7 @@ export class SupplierService {
             thresholdQtySnapshot: dto.minBuyers,
             committedQty: 0,
             neighbourhoodId: dto.teamDealNeighbourhoodId || supplier.neighbourhoodId,
-            deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+            deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           },
         });
       }
@@ -177,7 +185,7 @@ export class SupplierService {
       title?: string;
       description?: string;
       categoryId?: string;
-      isActive?: boolean; // If false, close associated open pools
+      isActive?: boolean;
       unitPriceXaf?: number;
       thresholdQty?: number;
     },
@@ -202,7 +210,7 @@ export class SupplierService {
       if (data.isActive === false) {
         await tx.pool.updateMany({
           where: { productId, status: 'OPEN' },
-          data: { status: 'EXPIRED' }, // or 'CANCELLED' – choose based on your enum
+          data: { status: 'EXPIRED' },
         });
       }
 
@@ -417,12 +425,10 @@ export class SupplierService {
   // ── Catalog imports ────────────────────────────────────────────────────────
 
   async getLatestCatalogImport(userId: string) {
-    // Delegate to CatalogService (which should have the logic)
     return this.catalogService.getLatestCatalogImport(userId);
   }
 
   async importCatalog(userId: string, importData: any) {
-    // Delegate to CatalogService
     return this.catalogService.importCatalog(userId, importData);
   }
 }
