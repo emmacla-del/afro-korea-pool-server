@@ -1,9 +1,11 @@
+// src/main.ts
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { ValidationPipe } from '@nestjs/common'; // ✅ ADD
 import fastifyCors from '@fastify/cors';
 import fastifyHelmet from '@fastify/helmet';
-import fastifyStatic from '@fastify/static'; // 👈 ADD THIS
+import fastifyStatic from '@fastify/static';
 import multipart from '@fastify/multipart';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -20,7 +22,6 @@ async function bootstrap() {
   const host = process.env.HOST ?? '0.0.0.0';
   const bodyLimit = Number(process.env.JSON_BODY_LIMIT_BYTES ?? '') || 1024 * 1024;
 
-  // Ensure uploads directory exists
   const uploadsDir = join(__dirname, '..', 'uploads');
   if (!existsSync(uploadsDir)) {
     mkdirSync(uploadsDir, { recursive: true });
@@ -49,7 +50,6 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // ✅ Serve uploaded files via Fastify static (works with Fastify adapter)
   await app.register(fastifyStatic, {
     root: uploadsDir,
     prefix: '/uploads/',
@@ -62,6 +62,21 @@ async function bootstrap() {
       files: 10,
     },
   });
+
+  // ✅ ValidationPipe with implicit conversion — this is what makes
+  // multipart string fields like "500" coerce to number in DTOs.
+  // whitelist: true  — strips unknown fields (prevents noise in DTOs)
+  // transform: true  — enables @Transform decorators in DTOs
+  // enableImplicitConversion — auto-converts "500" → 500 for @IsNumber fields
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
 
   console.log(`${new Date().toISOString()} - DATABASE_URL present: ${Boolean(process.env.DATABASE_URL)}`);
   try {
