@@ -2,17 +2,22 @@ import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
 
 export class CreateProductDto {
     @IsString()
-    title!: string; // Added ! here
+    title!: string;
 
     @IsOptional()
     @IsString()
     description?: string;
 
     @IsString()
-    categoryId!: string; // Added ! here
+    categoryId!: string;
 
     @IsNumber()
-    price!: number; // Added ! here
+    price!: number;
+
+    // --- Add this line back! ---
+    @IsOptional()
+    @IsNumber()
+    stock?: number;
 
     @IsOptional()
     @IsNumber()
