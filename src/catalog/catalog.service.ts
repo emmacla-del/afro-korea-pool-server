@@ -1,3 +1,4 @@
+// src/catalog/catalog.service.ts
 import {
   BadRequestException,
   ForbiddenException,
@@ -45,6 +46,17 @@ export class CatalogService {
       .toUpperCase()}`;
   }
 
+  /**
+   * Resolve a category name to its ID. If the name doesn't exist, return undefined.
+   */
+  private async getCategoryIdByName(name?: string): Promise<string | undefined> {
+    if (!name) return undefined;
+    const category = await this.prisma.category.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' } },
+    });
+    return category?.id;
+  }
+
   // ── Cloudinary ─────────────────────────────────────────────────────────────
 
   private async uploadToCloudinary(buffer: Buffer, filename: string): Promise<string> {
@@ -83,6 +95,9 @@ export class CatalogService {
 
   // ── Write Operations ────────────────────────────────────────────────────────
 
+  /**
+   * Create a new product with images, and optionally create a team deal pool.
+   */
   async createProductWithImages(
     userId: string,
     data: {
@@ -90,29 +105,41 @@ export class CatalogService {
       description?: string;
       price: number;
       stock: number;
-      categoryId?: string;
+      category?: string;                 // category name (from frontend)
+      teamPrice?: number;                // optional team price
+      minBuyers?: number;                // optional min buyers
+      teamDealNeighbourhoodId?: string;  // optional neighbourhood for the deal
     },
     files: Array<{ buffer: Buffer; filename: string; mimetype: string }>,
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
+    // Resolve category name to ID
+    const categoryId = await this.getCategoryIdByName(data.category);
+
+    // Upload images to Cloudinary
     const uploadedUrls = await Promise.all(
       files.map((file) => this.uploadToCloudinary(file.buffer, file.filename)),
     );
 
+    const roundedPrice = Math.round(data.price);
+
     const result = await this.prisma.$transaction(async (tx) => {
       const productId = randomUUID();
-      const roundedPrice = Math.round(data.price);
 
-      return tx.product.create({
+      // 1. Create product (including team deal fields)
+      const product = await tx.product.create({
         data: {
           id: productId,
           supplierId,
           title: data.product_name,
           description: data.description,
-          categoryId: data.categoryId,
+          categoryId,
           minPrice: roundedPrice,
           isActive: true,
+          teamPrice: data.teamPrice,
+          minBuyers: data.minBuyers,
+          teamDealNeighbourhoodId: data.teamDealNeighbourhoodId,
           variants: {
             create: {
               id: randomUUID(),
@@ -136,9 +163,35 @@ export class CatalogService {
         },
         include: { variants: true, images: true, stats: true },
       });
+
+      // 2. If team deal fields are present, create a Pool record
+      if (data.teamPrice && data.minBuyers) {
+        const variant = product.variants[0];
+        if (variant) {
+          await tx.pool.create({
+            data: {
+              variantId: variant.id,
+              productId: product.id,
+              dealType: 'TEAM_DEAL',
+              status: 'OPEN',
+              minBuyers: data.minBuyers,
+              teamPrice: data.teamPrice,
+              unitPriceXafSnapshot: data.price,
+              thresholdQtySnapshot: data.minBuyers,
+              committedQty: 0,
+              neighbourhoodId: data.teamDealNeighbourhoodId,
+              deadlineAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+            },
+          });
+        }
+      }
+
+      return product;
     });
 
+    // Invalidate caches
     await this.cacheService.delPatterns('products:*', 'home:feed:*', 'home:categories');
+
     return result;
   }
 
@@ -339,7 +392,7 @@ export class CatalogService {
   async findOne(productId: string, userId?: string) {
     const product = await this.productService.getProductById(productId, userId);
 
-    // 1. Explicitly type 'variant' as any to satisfy the compiler
+    // Explicitly type 'variant' as any to satisfy the compiler
     const variantIds = (product.variants ?? []).map((variant: any) => variant.id);
 
     const pools = await this.dealService.getPoolsForVariants(variantIds);
@@ -347,10 +400,7 @@ export class CatalogService {
 
     return {
       ...product,
-      // 2. Explicitly type 'image' as any
-      images: (product.images ?? []).map((image: any) =>
-        this.normaliseImageUrl(image.url)
-      ),
+      images: (product.images ?? []).map((image: any) => this.normaliseImageUrl(image.url)),
       variants: product.variants ?? [],
     };
   }

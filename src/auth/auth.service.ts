@@ -1,13 +1,16 @@
+// src/auth/auth.service.ts
 import {
   Injectable,
   UnauthorizedException,
   ConflictException,
-  InternalServerErrorException
+  InternalServerErrorException,
+  BadRequestException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { CacheService } from '../common/cache/cache.service';
 import { RegisterDto, LoginDto } from './auth.dto';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -41,7 +44,7 @@ export class AuthService {
     const payload = {
       phone: user.phone,
       sub: user.id,
-      role: user.role
+      role: user.role,
     };
 
     return {
@@ -56,41 +59,73 @@ export class AuthService {
   }
 
   /**
-   * 3. REGISTER (Creates a new User)
+   * 3. REGISTER (Creates a new User, and if SUPPLIER, also creates a Supplier record)
    */
   async register(dto: RegisterDto) {
-    // Check if user already exists
+    // 1. Restrict roles – only CUSTOMER or SUPPLIER via public registration
+    const allowedRoles = ['CUSTOMER', 'SUPPLIER'];
+    let requestedRole = dto.role || 'CUSTOMER';
+    if (!allowedRoles.includes(requestedRole)) {
+      throw new BadRequestException('Invalid role. Allowed roles: CUSTOMER, SUPPLIER');
+    }
+    const userRole = requestedRole as UserRole;
+
+    // 2. Check if user already exists
     const existingUser = await this.prisma.user.findUnique({
       where: { phone: dto.phone },
     });
-
     if (existingUser) {
       throw new ConflictException('Phone number already registered');
     }
 
     try {
-      // Hash the password for security
       const hashedPassword = await bcrypt.hash(dto.password, 10);
 
-      const newUser = await this.prisma.user.create({
-        data: {
-          name: dto.name,
-          phone: dto.phone,
-          password: hashedPassword,
-          role: dto.role || 'CUSTOMER',
-          totalPoints: 0, // Matches your updated Prisma schema
-        },
+      // Use a transaction to create both User and Supplier (if role is SUPPLIER)
+      const result = await this.prisma.$transaction(async (prisma) => {
+        // Create the user
+        const user = await prisma.user.create({
+          data: {
+            name: dto.name,
+            phone: dto.phone,
+            password: hashedPassword,
+            role: userRole,
+            totalPoints: 0,
+          },
+        });
+
+        // If role is SUPPLIER, create the corresponding Supplier record
+        if (user.role === UserRole.SUPPLIER) {
+          // Ensure displayName is always a string
+          const displayName =
+            dto.supplierData?.displayName ?? dto.name ?? dto.phone ?? 'Supplier';
+          const country = dto.supplierData?.country ?? 'CM';
+
+          await prisma.supplier.create({
+            data: {
+              ownerUserId: user.id,
+              displayName,
+              country,
+              businessRegNumber: dto.supplierData?.businessRegNumber ?? null,
+              verificationStatus: 'UNVERIFIED',
+              // neighbourhoodId can be added later
+            },
+          });
+        }
+
+        return user;
       });
 
-      const { password, ...result } = newUser;
-      return result;
+      const { password, ...userWithoutPassword } = result;
+      return userWithoutPassword;
     } catch (error) {
+      console.error('Registration error:', error);
       throw new InternalServerErrorException('Error creating account');
     }
   }
 
   /**
-   * 4. LOGOUT (Fixed TS2339 Error)
+   * 4. LOGOUT
    */
   async logout(userId: string) {
     try {
@@ -99,7 +134,7 @@ export class AuthService {
 
       return {
         success: true,
-        message: 'Logged out successfully'
+        message: 'Logged out successfully',
       };
     } catch (error) {
       throw new InternalServerErrorException('Logout process failed');
