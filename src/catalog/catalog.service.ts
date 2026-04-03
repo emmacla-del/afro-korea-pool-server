@@ -106,6 +106,7 @@ export class CatalogService {
       price: number;
       stock: number;
       category?: string;                 // category name (from frontend)
+      categoryId?: string;               // category UUID (preferred over name lookup)
       teamPrice?: number;                // optional team price
       minBuyers?: number;                // optional min buyers
       teamDealNeighbourhoodId?: string;  // optional neighbourhood for the deal
@@ -114,8 +115,8 @@ export class CatalogService {
   ) {
     const supplierId = await this.getSupplierIdForUser(userId);
 
-    // Resolve category name to ID
-    const categoryId = await this.getCategoryIdByName(data.category);
+    // Prefer explicit UUID; fall back to name lookup for legacy clients
+    const categoryId = data.categoryId ?? await this.getCategoryIdByName(data.category);
 
     // Upload images to Cloudinary
     const uploadedUrls = await Promise.all(

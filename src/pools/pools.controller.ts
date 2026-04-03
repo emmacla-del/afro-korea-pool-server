@@ -17,10 +17,10 @@ const commitSchema = z.object({
 });
 
 const createTeamDealSchema = z.object({
-  variantId: z.string().uuid(),
+  productId: z.string().uuid(),          // 👈 changed from variantId
   teamPrice: z.number().int().positive(),
   minBuyers: z.number().int().min(2).optional().default(2),
-  neighbourhoodId: z.string().uuid().optional(), // 👈 added
+  neighbourhoodId: z.string().uuid().optional(),
 });
 
 @Controller()
@@ -78,10 +78,10 @@ export class PoolsController {
 
     return this.poolsService.createTeamDeal(
       supplier.id,
-      parsed.variantId,
+      parsed.productId,                   // 👈 changed from parsed.variantId
       parsed.teamPrice,
       parsed.minBuyers,
-      parsed.neighbourhoodId, // 👈 pass through
+      parsed.neighbourhoodId,
     );
   }
 
@@ -101,5 +101,15 @@ export class PoolsController {
   async joinTeamDeal(@Req() req: FastifyRequest, @Param('id') poolId: string) {
     const userId = requireUserId(req);
     return this.poolsService.joinTeamDeal(userId, poolId);
+  }
+
+  // --- NEW: Get active team deal for a product variant ---
+  /**
+   * Returns the first open team deal pool for the given variant ID.
+   * Used by the frontend to determine whether to show "Join Group" or "Start Group".
+   */
+  @Get('/pools/variant/:variantId/active')
+  async getActiveTeamDealForVariant(@Param('variantId') variantId: string) {
+    return this.poolsService.getActiveTeamDealForVariant(variantId);
   }
 }
