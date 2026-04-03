@@ -223,15 +223,20 @@ export class PoolsService {
 
     let variant = product.variants[0];
     if (!variant) {
-      // Auto-create a default variant using product's minPrice (or fallback 0)
+      // Use a reasonable fallback price (10,000 XAF) if minPrice is null or 0
+      const fallbackPrice = 10000;
+      const price = (product.minPrice && product.minPrice > 0) ? product.minPrice : fallbackPrice;
+
+      console.log(`[createTeamDeal] Auto-creating variant for product ${product.id} with price ${price}`);
+
       variant = await this.prisma.productVariant.create({
         data: {
           productId: product.id,
-          sku: `${product.id}-default`,
-          unitPriceXaf: (product as any).minPrice ?? 0,
+          sku: `${product.id}-auto-${Date.now()}`,
+          unitPriceXaf: price,
           thresholdQty: 1,
           isActive: product.isActive,
-          leadTimeDays: 1,                     // required field in your schema
+          leadTimeDays: 1,
         },
       });
     }
@@ -346,10 +351,6 @@ export class PoolsService {
   }
 
   // --- NEW: Get active team deal for a variant ---
-  /**
-   * Returns the first open team deal pool for the given variant ID.
-   * Used by the frontend to check if an active group already exists.
-   */
   async getActiveTeamDealForVariant(variantId: string) {
     const now = new Date();
     return this.prisma.pool.findFirst({
