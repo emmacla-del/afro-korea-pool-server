@@ -82,6 +82,7 @@ export class SupplierController {
             price: Number(fields.price),
             stock: Number(fields.stock),
             category: fields.category,
+            categoryId: fields.categoryId,
             teamPrice: fields.teamPrice ? Number(fields.teamPrice) : undefined,
             minBuyers: fields.minBuyers ? Number(fields.minBuyers) : undefined,
             teamDealNeighbourhoodId: fields.teamDealNeighbourhoodId,

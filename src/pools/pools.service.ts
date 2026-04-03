@@ -206,18 +206,34 @@ export class PoolsService {
 
   async createTeamDeal(
     supplierId: string,
-    variantId: string,
+    productId: string,
     teamPrice: number,
     minBuyers: number = 2,
-    neighbourhoodId?: string, // extended
+    neighbourhoodId?: string,
   ) {
-    const variant = await this.prisma.productVariant.findUnique({
-      where: { id: variantId },
-      include: { product: true },
+    // Find product and its first variant
+    const product = await this.prisma.product.findUnique({
+      where: { id: productId },
+      include: { variants: { take: 1 } },
     });
-    if (!variant) throw new NotFoundException('Variant not found');
-    if (variant.product.supplierId !== supplierId) {
+    if (!product) throw new NotFoundException('Product not found');
+    if (product.supplierId !== supplierId) {
       throw new UnauthorizedException('You do not own this product');
+    }
+
+    let variant = product.variants[0];
+    if (!variant) {
+      // Auto-create a default variant using product's minPrice (or fallback 0)
+      variant = await this.prisma.productVariant.create({
+        data: {
+          productId: product.id,
+          sku: `${product.id}-default`,
+          unitPriceXaf: (product as any).minPrice ?? 0,
+          thresholdQty: 1,
+          isActive: product.isActive,
+          leadTimeDays: 1,                     // required field in your schema
+        },
+      });
     }
 
     const deadlineAt = new Date();
@@ -225,7 +241,7 @@ export class PoolsService {
 
     return this.prisma.pool.create({
       data: {
-        variantId,
+        variantId: variant.id,
         dealType: DealType.TEAM_DEAL,
         unitPriceXafSnapshot: variant.unitPriceXaf,
         teamPrice,
@@ -326,6 +342,31 @@ export class PoolsService {
       }
 
       return updatedPool;
+    });
+  }
+
+  // --- NEW: Get active team deal for a variant ---
+  /**
+   * Returns the first open team deal pool for the given variant ID.
+   * Used by the frontend to check if an active group already exists.
+   */
+  async getActiveTeamDealForVariant(variantId: string) {
+    const now = new Date();
+    return this.prisma.pool.findFirst({
+      where: {
+        variantId,
+        dealType: DealType.TEAM_DEAL,
+        status: PoolStatus.OPEN,
+        deadlineAt: { gt: now },
+      },
+      select: {
+        id: true,
+        currentBuyers: true,
+        minBuyers: true,
+        teamPrice: true,
+        status: true,
+        deadlineAt: true,
+      },
     });
   }
 
